@@ -15,7 +15,7 @@ What fun!!
 
 ## First lets install some likely packages
 
-```{r settingup}
+```{r settingup, message=F, warning=F}
 install.packages("pacman")
 library(pacman)
 p_load("tidyverse")
@@ -28,11 +28,12 @@ p_load("xgboost")
 p_load("pca")
 p_load("glmnet")
 p_load("skimr")
+p_load("pROC")
 ```
 
 
 ## And the load in some data
-```{r gettingdata}
+```{r gettingdata, message=F, warning=F, cache=T}
 application_test <- read_csv("~/allMortgage/application_test.csv")
 application_train <- read_csv("~/allMortgage/application_train.csv")
 bureau_balance <- read_csv("~/allMortgage/bureau_balance.csv")
@@ -47,12 +48,157 @@ sample_submission <- read_csv("~/allMortgage/sample_submission.csv")
 
 ## Take a Skim of the main sheet
 
-```{r skim}
+```{r skim, cache=TRUE}
 skim(application_train)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
 
 ## Cut straight away to some quick results
+```{r rpart, cache=T}
+
+application_train_train_id <- application_train$SK_ID_CURR %>% sample(250000)
+application_train_train <- application_train %>% filter(SK_ID_CURR %in% application_train_train_id)
+application_train_test <- application_train %>% filter(!SK_ID_CURR %in% application_train_train_id)
+mod_rpart_1 <- rpart(data = application_train_train, formula = TARGET ~.)
+mod_rpart_1 %>% summary()
+plotcp(mod_rpart_1)
+```
+```{r plotrpart}
+rpart.plot(mod_rpart_1)
+```
+
+## Maybe we can force a larger tree?
+```{r rpart2, cache=TRUE}
+mod_rpart_2 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.001)
+plotcp(mod_rpart_2)
+```
+```{r plotrpart2}
+rpart.plot(mod_rpart_2)
+```
+
+## Hard to read so let's inspect
+
+```{r summrpart2}
+summary(mod_rpart_2)
+```
+
+## Looks sensible, let's assess how good the model is
+
+```{r evaluaterpart, cache=TRUE}
+prediction <- predict(mod_rpart_2, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET)
+```
+
+## Where too from here?
+Without all the data, without optimising depth, a single tree can still get significant more than half way to competitive scores.
+Could just keep hacking...
+Or maybe explore and understand the data
 
 
+## Just what sort of data do we have?
+It's worth looking at the diagram provided in this link <https://www.kaggle.com/c/home-credit-default-risk/data>
+
+And also inspecting the description file that we have briefly
+
+```{r descriptions}
+HomeCredit_columns_description %>% head(n = 219)
+```
+
+```{r descriptplot, cache=TRUE}
+HomeCredit_columns_description %>% 
+  filter(X1  %in% c(1:50)) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+
+HomeCredit_columns_description %>% 
+  filter(X1  %in% c(51:100)) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+
+HomeCredit_columns_description %>% 
+  filter(X1  %in% c(101:150)) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+
+HomeCredit_columns_description %>% 
+  filter(X1  %in% c(151:200)) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+
+HomeCredit_columns_description %>% 
+  filter(X1  > 200) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+```
+
+## Where to start?
+There's a lot of data here of very different types
+That means a LOT of feature engineering would be required to make good value of all of it.
+Aim is to get one response per SK_ID_CURR, which could be a lot of manipulation
+
+## How to decide?
+A few options....
+Start at the top?  (Only if we want to work long enough to get to the bottom)
+Visualise a few things, look for some inspiration (always fun)
+Look to cut out or reduce data (great if efficiency is a concern)
+Apply some domain expertise/intuition about where greatest value might lie
+Find some other more calculated way of assessing where most data value might lie?  (in this case, coverage?)
+
+## Let's quickly check coverage
+
+```{r coveragecheck_bureau}
+colnames(bureau)
+bureau$SK_ID_CURR %>% unique() %>% length()
+colnames(bureau_balance)
+bureau_summ <- bureau %>% group_by(SK_ID_CURR) %>% 
+  summarise(n_IDs = unique(SK_ID_BUREAU) %>% length())
+bureau_summ %>% ggplot(aes(x = 1, y = n_IDs))+geom_violin()
+bureau_summ %>% ggplot(aes(x = 1, y = n_IDs))+geom_violin() +scale_y_continuous(limits = c(0,30))
+
+TARGET <- application_train %>% select(SK_ID_CURR, TARGET)
+bureau_summ <- bureau_summ %>% inner_join(TARGET, by = "SK_ID_CURR")
+bureau_summ %>% ggplot(aes(x = 1, y = n_IDs, col = as.factor(TARGET)))+
+  geom_violin()
+  #scale_y_continuous(limits = c(0,30))
+
+```
+
+```{r coveragecheck_install}
+colnames(installments_payments)
+installments_payments$SK_ID_CURR %>% unique() %>% length()
+colnames(credit_card_balance) 
+credit_card_balance$SK_ID_CURR %>% unique() %>% length()
+```
+
+## Lets visualise some more anyway
+
+```{r creditvis}
+sample_med_id <- application_train$SK_ID_CURR %>% sample(20000)
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(SK_ID_CURR %in% sample_med_id) %>% 
+  ggplot(aes(x = AMT_CREDIT_LIMIT_ACTUAL, y = AMT_BALANCE, col = MONTHS_BALANCE))+
+  geom_jitter(alpha = 0.6)+
+  facet_grid(TARGET ~.)+
+  scale_color_gradientn(colors = rainbow(10))
+```
