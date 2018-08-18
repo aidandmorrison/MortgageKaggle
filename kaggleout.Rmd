@@ -1,0 +1,58 @@
+---
+title: "MortgageKaggle"
+author: "Aidan Morrison"
+date: "18/08/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Starting a mortgage kaggle comp
+
+What fun!!
+
+## First lets install some likely packages
+
+```{r settingup}
+install.packages("pacman")
+library(pacman)
+p_load("tidyverse")
+p_load("lubridate")
+p_load("scales")
+p_load("ranger")
+p_load("rpart")
+p_load("rpart.plot")
+p_load("xgboost")
+p_load("pca")
+p_load("glmnet")
+p_load("skimr")
+```
+
+
+## And the load in some data
+```{r gettingdata}
+application_test <- read_csv("~/allMortgage/application_test.csv")
+application_train <- read_csv("~/allMortgage/application_train.csv")
+bureau_balance <- read_csv("~/allMortgage/bureau_balance.csv")
+bureau <- read_csv("~/allMortgage/bureau.csv")
+credit_card_balance <- read_csv("~/allMortgage/credit_card_balance.csv")
+HomeCredit_columns_description <- read_csv("~/allMortgage/HomeCredit_columns_description.csv")
+installments_payments <- read_csv("~/allMortgage/installments_payments.csv")
+POS_CASH_balance <- read_csv("~/allMortgage/POS_CASH_balance.csv")
+previous_application <- read_csv("~/allMortgage/previous_application.csv")
+sample_submission <- read_csv("~/allMortgage/sample_submission.csv")
+```
+
+## Take a Skim of the main sheet
+
+```{r skim}
+skim(application_train)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Cut straight away to some quick results
+
+
