@@ -479,3 +479,376 @@ credit_card_balance %>%
   length()
 
 ```
+
+## Time to actually summarise the Credit Card Data
+
+```{r creditsumm, cache=T}
+credit_card_balance_summ <- credit_card_balance %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise(hist.length = min(MONTHS_BALANCE),
+            max.lim = max(AMT_CREDIT_LIMIT_ACTUAL),
+            min.lim = min(AMT_CREDIT_LIMIT_ACTUAL),
+            diff.lim = max.lim - min.lim,
+            mean.bal = mean(AMT_BALANCE),
+            mean.count.draw = mean(CNT_DRAWINGS_CURRENT),
+            mean.count.ATM = mean(CNT_DRAWINGS_ATM_CURRENT),
+            sd.bal.med = sd(AMT_BALANCE)/median(AMT_BALANCE),
+            sd.bal = sd(AMT_BALANCE),
+            mean.count.POS = mean(CNT_DRAWINGS_POS_CURRENT),
+            sd.count.POS = sd(CNT_DRAWINGS_POS_CURRENT),
+            draw.frac = mean((AMT_BALANCE - AMT_CREDIT_LIMIT_ACTUAL+1)/(AMT_CREDIT_LIMIT_ACTUAL+1)))
+
+credit_card_balance_summ_1 <- credit_card_balance %>% 
+  filter(MONTHS_BALANCE == -1) %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise(DPD.1 = first(SK_DPD),
+            overlim = case_when(first(AMT_BALANCE) > first(AMT_CREDIT_LIMIT_ACTUAL) ~ 1,
+                                !first(AMT_BALANCE) > first(AMT_CREDIT_LIMIT_ACTUAL) ~0),
+            overdue = case_when(first(SK_DPD) > 0 ~ 1,
+                                !first(SK_DPD) > 0 ~ 0),
+            over.lim.due = overlim*overdue,
+            limdiff = first(AMT_BALANCE)-first(AMT_CREDIT_LIMIT_ACTUAL))
+
+credit_card_balance_summ <- credit_card_balance_summ %>% 
+  inner_join(credit_card_balance_summ_1, by = "SK_ID_CURR") %>% 
+  mutate(has.credit.card = 1)
+
+skim(credit_card_balance_summ)
+
+credit_card_balance_summ %>% 
+  filter(sd.bal.med < 10) %>% 
+  ggplot(aes(x = mean.bal, y = hist.length, col = sd.bal.med))+
+  geom_point(alpha = 0.6)+
+  scale_color_gradientn(colors = rainbow(10))+
+  facet_grid(overdue~overlim)
+
+credit_card_balance_summ %>% 
+  ggplot(aes(x = mean.bal, y = hist.length, col = sd.bal))+
+  geom_point(alpha = 0.6)+
+  scale_color_gradientn(colors = rainbow(10))+
+  facet_grid(overdue~overlim)
+
+```
+
+## Visual inspection always helps, I found:
+
+I had picked the 'max()' of a negative series
+
+The sd() was generally proportional just to the size of the balance
+
+the draw.frac had a bunch of infinites and non-numbers
+
+
+## Time to join on the credit card data and hack again
+
+```{r joincredit, cache=T}
+application_train_train <- application_train_train %>% left_join(credit_card_balance_summ, by = "SK_ID_CURR")
+application_train_test <- application_train_test %>% left_join(credit_card_balance_summ, by = "SK_ID_CURR")
+
+mod_rpart_3 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.0002)
+plotcp(mod_rpart_3)
+mod_rpart_3_p <- prune.rpart(mod_rpart_3, .0004)
+plotcp(mod_rpart_3_p)
+rpart.plot(mod_rpart_3_p)
+summary(mod_rpart_3_p)
+```
+
+## Is it any better?
+
+```{r evaluaterpart3, cache=TRUE}
+prediction <- predict(mod_rpart_3_p, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_3")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_3)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_3)
+```
+
+## Where to next?
+
+There's still plenty on wishlist...
+
+document flags 
+
+occupation types and organisation types (reduce dimensions)
+
+building types
+
+understand relationships between previous and current ids
+
+make a summary for all the other tables
+
+hack some more... with xgboost?
+
+```{r xgboost1, cache=T}
+
+application_train_train <- application_train_train %>% select(-sd.bal.med)
+application_train_test <- application_train_test %>% select(-sd.bal.med)
+ train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE)), application_train_train$TARGET)
+ names(train) <- c("data", "label")
+ test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE)), application_train_test$TARGET)
+ names(test) <- c("data", "label")
+ 
+# checker <- tibble()
+#  for(i in colnames(application_train_train %>% select(-TARGET))){
+#    print(i)
+#    train <- list(sparse.model.matrix(~., data = application_train_train %>% select(i, checker$i, TARGET)), application_train_train$TARGET)
+# adder <- tibble(i)
+#    checker <- checker %>% bind_rows(adder)
+#  }
+
+# colnames(application_train_train) %in% checker$i
+## Here's the mistake coming up, why are the lengths different?
+#  dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+#  dtest <- xgb.DMatrix(data = test$data, label=test$label)
+#  watchlist <- list(train=dtrain, test=dtest)
+# #
+#  model <- xgb.train(data = dtrain, max.depth = 20, booster = "gblinear", eta = .2, nrounds = 15, watchlist = watchlist)
+#
+
+
+```
+
+
+## What about the highly cardinal values
+
+```{r cardinals}
+
+application_train %>% 
+  ggplot(aes(x = DAYS_BIRTH, AMT_INCOME_TOTAL, col = OCCUPATION_TYPE))+
+  geom_point()
+
+application_train %>% 
+  head(n = 20000) %>% 
+  ggplot(aes(x = DAYS_BIRTH, AMT_INCOME_TOTAL, col = OCCUPATION_TYPE))+
+  geom_point()+
+  scale_y_continuous(limits = c(0, 2000000))
+
+application_train_train %>% 
+  ggplot(aes(x = OCCUPATION_TYPE))+
+  geom_bar(stat = "count")+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+application_train_train %>% 
+  ggplot(aes(x = ORGANIZATION_TYPE))+
+  geom_bar(stat = "count")+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+application_train_train %>% 
+  ggplot(aes(x = ORGANIZATION_TYPE, y = OCCUPATION_TYPE, col = as.factor(TARGET)))+
+  geom_jitter()+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+
+```
+
+
+## We need a summary
+
+```{r, cardinalsumm, cache=T}
+cardinal_summ <- application_train_train %>% 
+  group_by(ORGANIZATION_TYPE, OCCUPATION_TYPE) %>% 
+  summarise(TARGET.mean = mean(TARGET),
+            AMT_INCOME_TOTAL.mean = mean(AMT_INCOME_TOTAL),
+            AMT_INCOME_TOTAL.med = median(AMT_INCOME_TOTAL),
+            AMT_ANNUITY.mean = mean(AMT_INCOME_TOTAL),
+            AMT_CREDIT.mean = mean(AMT_CREDIT),
+            DAYS_BIRTH.mean = mean(DAYS_BIRTH),
+            DAYS_EMPLOYED.mean = mean(DAYS_EMPLOYED),
+            CNT_CHILDREN.mean = mean(CNT_CHILDREN),
+            CNT_FAM_MEMBERS.mean = mean(CNT_FAM_MEMBERS),
+            FLAG_EMP_PHONE.mean = mean(FLAG_EMP_PHONE),
+            number = length(AMT_INCOME_TOTAL),
+            FLAG_DOCUMENT_6.mean = mean(FLAG_DOCUMENT_6))
+
+cardinal_summ %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = TARGET.mean, size = number))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))
+
+cardinal_summ %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = TARGET.mean, size = log(number)))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = OCCUPATION_TYPE, size = log(number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = OCCUPATION_TYPE, size = (number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  #filter(str_detect(ORGANIZATION_TYPE, "Trade") == TRUE) %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = ORGANIZATION_TYPE, size = log(number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  filter(str_detect(ORGANIZATION_TYPE, "type") == TRUE) %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = ORGANIZATION_TYPE, size = log(number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  filter(str_detect(ORGANIZATION_TYPE, "type") == FALSE) %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = ORGANIZATION_TYPE, size = log(number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  ggplot(aes(x = TARGET.mean, y = log10(number), size = (AMT_CREDIT.mean), col = OCCUPATION_TYPE))+
+  geom_point()
+
+cardinal_summ %>% 
+  #filter(DAYS_BIRTH.mean)
+  ggplot(aes(x = TARGET.mean, y = log10(number), size = (AMT_ANNUITY.mean), col = DAYS_BIRTH.mean))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))
+
+cardinal_summ %>% 
+  filter(DAYS_EMPLOYED.mean< 200000) %>% 
+  ggplot(aes(x = TARGET.mean, y = log10(number), size = (AMT_ANNUITY.mean), col = DAYS_EMPLOYED.mean))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))
+
+cardinal_summ %>% 
+  filter(DAYS_EMPLOYED.mean< 200000) %>% 
+  ggplot(aes(x = TARGET.mean, y = log10(number), size = (AMT_ANNUITY.mean), col = DAYS_EMPLOYED.mean))+
+  geom_point(alpha = 0.5)+
+  scale_color_gradientn(colours = rainbow(10))+
+  scale_x_continuous(limits = c(0,.25))
+
+cardinal_summ %>% 
+  filter(number > 80) %>% 
+  filter(DAYS_EMPLOYED.mean < 200000) %>%
+  ggplot(aes(x = OCCUPATION_TYPE, y = ORGANIZATION_TYPE, size = number, col = TARGET.mean))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
+
+```
+
+
+## Now to add suitable variables
+
+A few possibilities...
+
+Bin it into a few categories? (How many?)
+
+Pass the continuous variable
+
+Omit small data-points?
+
+```{r cardsumfeatures}
+
+cardinal_summ <- cardinal_summ %>% 
+  mutate(jobrisk = case_when(number < 80 ~ "lowdata",
+                             number >= 80 & TARGET.mean < 0.05 ~ "LOW",
+                             number >= 80 & TARGET.mean >=0.05 & TARGET.mean < 0.1 ~ "MED",
+                             number >= 80 & TARGET.mean >=0.1 & TARGET.mean < 0.15 ~ "HIGH",
+                             number >= 80 & TARGET.mean >=0.15 ~ "VHIGH"),
+         oddjob = case_when(number < 50 ~ 1,
+                            number >= 50 ~0))
+
+application_train_train <- application_train_train %>% 
+  left_join(cardinal_summ, by = c("OCCUPATION_TYPE", "ORGANIZATION_TYPE"))
+application_train_test <- application_train_test %>% 
+  left_join(cardinal_summ, by = c("OCCUPATION_TYPE", "ORGANIZATION_TYPE"))
+
+application_train_train %>% glimpse()
+
+```
+
+## Now to see if it gets into the decision tree
+
+```{r cardtesting, cache=T}
+mod_rpart_4 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.0002)
+plotcp(mod_rpart_4)
+summary(mod_rpart_4)
+mod_rpart_4_p <- prune.rpart(mod_rpart_4, .0003)
+plotcp(mod_rpart_4_p)
+rpart.plot(mod_rpart_4_p)
+summary(mod_rpart_4_p)
+
+```
+
+## Target.mean wins!.
+
+But maybe lets check how it works in evaluation?
+
+```{r evaluaterpart4, cache=TRUE}
+prediction <- predict(mod_rpart_4, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_4")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_4)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_4)
+```
+
+## And the pruned version?
+
+```{r evaluaterpart4P, cache=TRUE}
+prediction <- predict(mod_rpart_4_p, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_4_P")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_4_P)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_4_P)
+```
+
+## Not bad! Could we reduce some data?
+
+It's not certain that this will help, it's likely it will in a boosted model, but for a single tree, just curious.
+
+```{r cardtestingmore, cache=T}
+mod_rpart_5 <- rpart(data = application_train_train %>% select(-ORGANIZATION_TYPE, -OCCUPATION_TYPE), formula = TARGET ~., cp = 0.0002)
+plotcp(mod_rpart_5)
+summary(mod_rpart_5)
+mod_rpart_5_p <- prune.rpart(mod_rpart_5, .00025)
+plotcp(mod_rpart_5_p)
+rpart.plot(mod_rpart_5_p)
+summary(mod_rpart_5_p)
+
+```
+
+But maybe lets check how it works in evaluation?
+
+```{r evaluaterpart5, cache=TRUE}
+prediction <- predict(mod_rpart_5, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_5")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_5)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_5)
+```
+
+## BOOM!  And the pruned version?
+
+```{r evaluaterpart5P, cache=TRUE}
+prediction <- predict(mod_rpart_5_p, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_5_P")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_5_P)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_5_P)
+```
+
+## That's great news!
+
+We can derive a factor variable with five levels and a continuous variable which outperforms two variables with high cardinality.  
