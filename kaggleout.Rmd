@@ -580,35 +580,6 @@ make a summary for all the other tables
 
 hack some more... with xgboost?
 
-```{r xgboost1, cache=T}
-
-application_train_train <- application_train_train %>% select(-sd.bal.med)
-application_train_test <- application_train_test %>% select(-sd.bal.med)
- train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE)), application_train_train$TARGET)
- names(train) <- c("data", "label")
- test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE)), application_train_test$TARGET)
- names(test) <- c("data", "label")
- 
-# checker <- tibble()
-#  for(i in colnames(application_train_train %>% select(-TARGET))){
-#    print(i)
-#    train <- list(sparse.model.matrix(~., data = application_train_train %>% select(i, checker$i, TARGET)), application_train_train$TARGET)
-# adder <- tibble(i)
-#    checker <- checker %>% bind_rows(adder)
-#  }
-
-# colnames(application_train_train) %in% checker$i
-## Here's the mistake coming up, why are the lengths different?
-#  dtrain <- xgb.DMatrix(data = train$data, label=train$label)
-#  dtest <- xgb.DMatrix(data = test$data, label=test$label)
-#  watchlist <- list(train=dtrain, test=dtest)
-# #
-#  model <- xgb.train(data = dtrain, max.depth = 20, booster = "gblinear", eta = .2, nrounds = 15, watchlist = watchlist)
-#
-
-
-```
-
 
 ## What about the highly cardinal values
 
@@ -852,3 +823,95 @@ roc(response = application_train_test$TARGET, predictor = application_train_test
 ## That's great news!
 
 We can derive a factor variable with five levels and a continuous variable which outperforms two variables with high cardinality.  
+
+```{r xgboost1, cache=T}
+
+application_train_train <- application_train_train %>% select(-sd.bal.med)
+application_train_test <- application_train_test %>% select(-sd.bal.med)
+application_train_train[is.na(application_train_train)] <- -10000000
+application_train_test[is.na(application_train_test)] <- -10000000
+application_train_train <- application_train_train %>% filter(!number == -10000000)
+application_train_test <- application_train_test %>% filter(!number == -10000000)
+
+
+### Without the highly cardinal features
+ train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), application_train_train$TARGET)
+ names(train) <- c("data", "label")
+ test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"), -.)), application_train_test$TARGET)
+ names(test) <- c("data", "label")
+ 
+### Including the cardinals
+ #  train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE,  -contains("Predicted_TARGET"))), application_train_train$TARGET)
+ # names(train) <- c("data", "label")
+ # test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -.,  -contains("Predicted_TARGET"))), application_train_test$TARGET)
+ # names(test) <- c("data", "label")
+ 
+# checker <- tibble()
+#  for(i in colnames(application_train_train %>% select(-TARGET))){
+#    print(i)
+#    train <- list(sparse.model.matrix(~., data = application_train_train %>% select(i, checker$i, TARGET)), application_train_train$TARGET)
+# adder <- tibble(i)
+#    checker <- checker %>% bind_rows(adder)
+#  }
+
+#colnames(application_train_train) %in% checker$i
+ 
+ ### heaps of testing to debug all the matrix objects
+#  testvec <- colnames(application_train_test) %in% colnames(application_train_train) %>% tibble()
+#  colnames(testvec) <- c("included")
+#  namesvec <- colnames(application_train_test) %>% tibble()
+#  colnames(namesvec) <- c("names")
+# testvec <- testvec %>% bind_cols(namesvec)
+# testvec %>% filter(included == F) %>% print()
+
+# application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique() == application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique()
+# 
+ test[["data"]]@Dimnames[[2]] %in% train[["data"]]@Dimnames[[2]]
+# 
+# strange <-  application_train_test %>% filter(jobrisk == "-1e+07") 
+# 
+# strange %>% ggplot(aes(x = AMT_INCOME_TOTAL, y = AMT_CREDIT, col = number))+
+#   geom_point()
+# 
+# strange %>% ggplot(aes(x = ORGANIZATION_TYPE, y = OCCUPATION_TYPE, col = number))+
+#   geom_point()+
+#   theme(axis.text.x = element_text(angle = 60))
+#  
+ 
+ dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+ dtest <- xgb.DMatrix(data = test$data, label=test$label)
+ watchlist <- list(train=dtrain, test=dtest)
+#
+ #mod_xgb_lin <- xgb.train(data = dtrain, booster = "gblinear",  nrounds = 50, watchlist = watchlist)
+ mod_xgb_tree <- xgb.train(data = dtrain,  booster = "gbtree", eta = .1, nrounds = 65, watchlist = watchlist)
+
+ 
+prediction <- predict(mod_xgb_tree, test$data) %>% tibble()
+colnames(prediction) <- c("Predicted_TARGET_xgb_tree")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_xgb_tree)
+roc(response = application_train_test$TARGET, predictor = prediction$Predicted_TARGET_xgb_tree)
+
+imp <- xgb.importance(model = mod_xgb_tree)
+imp %>% 
+  filter((Gain) > .0065, (Cover > .0065)) %>% 
+  ggplot(aes(x = log(Gain), y = log(Cover), col = (Frequency)))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  geom_text(aes(label = Feature))
+
+# imp %>% 
+#   filter((Gain) > .0065, (Cover > .0065)) %>% 
+#   ggplot(aes(x = (Gain), y = (Cover), col = (Frequency)))+
+#   geom_point()+
+#   scale_color_gradientn(colours = rainbow(10))
+ 
+# prediction <- predict(mod_xgb_lin, test$data) %>% tibble()
+# colnames(prediction) <- c("Predicted_TARGET_xgb_lin")
+# application_train_test <- application_train_test %>% bind_cols(prediction)
+# head(application_train_test$Predicted_TARGET_xgb_lin)
+# roc(response = application_train_test$TARGET, predictor = prediction$Predicted_TARGET_xgb_lin)
+#  
+
+
+```
