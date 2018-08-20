@@ -1,0 +1,854 @@
+---
+title: "MortgageKaggle"
+author: "Aidan Morrison"
+date: "18/08/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Starting a mortgage kaggle comp
+
+What fun!!
+
+## First lets install some likely packages
+
+```{r settingup, message=F, warning=F}
+install.packages("pacman")
+library(pacman)
+p_load("tidyverse")
+p_load("lubridate")
+p_load("scales")
+p_load("ranger")
+p_load("rpart")
+p_load("rpart.plot")
+p_load("xgboost")
+p_load("pca")
+p_load("glmnet")
+p_load("skimr")
+p_load("pROC")
+```
+
+
+## And the load in some data
+```{r gettingdata, message=F, warning=F, cache=T}
+application_test <- read_csv("~/allMortgage/application_test.csv")
+application_train <- read_csv("~/allMortgage/application_train.csv")
+bureau_balance <- read_csv("~/allMortgage/bureau_balance.csv")
+bureau <- read_csv("~/allMortgage/bureau.csv")
+credit_card_balance <- read_csv("~/allMortgage/credit_card_balance.csv")
+HomeCredit_columns_description <- read_csv("~/allMortgage/HomeCredit_columns_description.csv")
+installments_payments <- read_csv("~/allMortgage/installments_payments.csv")
+POS_CASH_balance <- read_csv("~/allMortgage/POS_CASH_balance.csv")
+previous_application <- read_csv("~/allMortgage/previous_application.csv")
+sample_submission <- read_csv("~/allMortgage/sample_submission.csv")
+```
+
+## Take a Skim of the main sheet
+
+```{r skim, cache=TRUE}
+skim(application_train)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Cut straight away to some quick results
+```{r rpart, cache=T}
+
+application_train_train_id <- application_train$SK_ID_CURR %>% sample(250000)
+application_train_train <- application_train %>% filter(SK_ID_CURR %in% application_train_train_id)
+application_train_test <- application_train %>% filter(!SK_ID_CURR %in% application_train_train_id)
+mod_rpart_1 <- rpart(data = application_train_train, formula = TARGET ~.)
+mod_rpart_1 %>% summary()
+plotcp(mod_rpart_1)
+```
+```{r plotrpart}
+rpart.plot(mod_rpart_1)
+```
+
+## Maybe we can force a larger tree?
+```{r rpart2, cache=TRUE}
+mod_rpart_2 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.001)
+plotcp(mod_rpart_2)
+```
+```{r plotrpart2}
+rpart.plot(mod_rpart_2)
+```
+
+## Hard to read so let's inspect
+
+```{r summrpart2}
+summary(mod_rpart_2)
+```
+
+## Looks sensible, let's assess how good the model is
+
+```{r evaluaterpart, cache=TRUE}
+prediction <- predict(mod_rpart_2, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET)
+```
+
+## Where too from here?
+Without all the data, without optimising depth, a single tree can still get significant more than half way to competitive scores.
+
+Could just keep hacking...
+
+Or maybe explore and understand the data
+
+
+## Just what sort of data do we have?
+It's worth looking at the diagram provided in this link <https://www.kaggle.com/c/home-credit-default-risk/data>
+
+And also inspecting the description file that we have briefly
+
+```{r descriptions}
+HomeCredit_columns_description %>% head(n = 219)
+```
+
+```{r descriptplot, cache=TRUE}
+HomeCredit_columns_description %>% 
+  filter(X1  %in% c(1:50)) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+
+HomeCredit_columns_description %>% 
+  filter(X1  %in% c(51:100)) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+
+HomeCredit_columns_description %>% 
+  filter(X1  %in% c(101:150)) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+
+HomeCredit_columns_description %>% 
+  filter(X1  %in% c(151:200)) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+
+HomeCredit_columns_description %>% 
+  filter(X1  > 200) %>% 
+  ggplot(aes(y = X1, col = Table))+
+  geom_text(aes(x = 0, label = Row), size = 2, hjust = 0)+
+  geom_text(aes(x = 8, label = Description), size = 2, hjust = 0)+
+  scale_x_continuous(limits = c(-0, 25))+
+  theme(legend.position = "bottom")
+```
+
+## Where to start?
+
+There's a lot of data here of very different types
+
+That means a LOT of feature engineering would be required to make good value of all of it.
+
+Aim is to get one response per SK_ID_CURR, which could be a lot of manipulation
+
+## How to decide?
+
+A few options....
+
+Start at the top?  (Only if we want to work long enough to get to the bottom)
+
+Visualise a few things, look for some inspiration (always fun)
+
+Look to cut out or reduce data (great if efficiency is a concern)
+
+Apply some domain expertise/intuition about where greatest value might lie
+
+Find some other more calculated way of assessing where most data value might lie?  (in this case, coverage?)
+
+## Let's quickly check coverage
+
+```{r coveragecheck_bureau}
+colnames(bureau)
+bureau$SK_ID_CURR %>% unique() %>% length()
+colnames(bureau_balance)
+bureau_summ <- bureau %>% group_by(SK_ID_CURR) %>% 
+  summarise(n_IDs = unique(SK_ID_BUREAU) %>% length())
+bureau_summ %>% ggplot(aes(x = 1, y = n_IDs))+geom_violin()
+bureau_summ %>% ggplot(aes(x = 1, y = n_IDs))+geom_violin() +scale_y_continuous(limits = c(0,30))
+
+TARGET <- application_train %>% select(SK_ID_CURR, TARGET)
+bureau_summ <- bureau_summ %>% inner_join(TARGET, by = "SK_ID_CURR")
+bureau_summ %>% ggplot(aes(x = 1, y = n_IDs, col = as.factor(TARGET)))+
+  geom_violin()
+  #scale_y_continuous(limits = c(0,30))
+
+```
+
+```{r coveragecheck_install}
+colnames(installments_payments)
+installments_payments$SK_ID_CURR %>% unique() %>% length()
+colnames(credit_card_balance) 
+credit_card_balance$SK_ID_CURR %>% unique() %>% length()
+```
+
+## Lets visualise some more anyway
+
+```{r creditvis}
+sample_med_id <- application_train$SK_ID_CURR %>% sample(20000)
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(SK_ID_CURR %in% sample_med_id) %>% 
+  ggplot(aes(x = AMT_CREDIT_LIMIT_ACTUAL, y = AMT_BALANCE, col = MONTHS_BALANCE))+
+  geom_jitter(alpha = 0.6)+
+  facet_grid(TARGET ~.)+
+  scale_color_gradientn(colors = rainbow(10))
+```
+
+
+
+```{r creditvis2}
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  #filter(SK_ID_CURR %in% sample_med_id) %>%
+  filter(AMT_CREDIT_LIMIT_ACTUAL < 50000) %>% 
+  ggplot(aes(x = AMT_CREDIT_LIMIT_ACTUAL, y = AMT_BALANCE, col = MONTHS_BALANCE))+
+  geom_jitter(alpha = 0.6)+
+  facet_grid(TARGET ~.)+
+  scale_color_gradientn(colors = rainbow(10))
+```
+
+```{r creditvis3}
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  #filter(SK_ID_CURR %in% sample_med_id) %>%
+  #filter(AMT_CREDIT_LIMIT_ACTUAL < 50000) %>% 
+  ggplot(aes( x = AMT_CREDIT_LIMIT_ACTUAL, col = as.factor(TARGET)))+
+  geom_histogram()
+
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  #filter(SK_ID_CURR %in% sample_med_id) %>%
+  #filter(AMT_CREDIT_LIMIT_ACTUAL < 50000) %>% 
+  ggplot(aes(x = TARGET, y = AMT_CREDIT_LIMIT_ACTUAL, col = as.factor(TARGET)))+
+  geom_violin()
+
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  #filter(SK_ID_CURR %in% sample_med_id) %>%
+  #filter(AMT_CREDIT_LIMIT_ACTUAL < 50000) %>% 
+  ggplot(aes(x = TARGET, y = AMT_BALANCE, col = as.factor(TARGET)))+
+  geom_violin()
+```
+
+Could be some evidence that the defaulters have higher credit balances on average, though a weak predictor.  Can we dive deeper, to get a sense of just how much, and how granular a credit history we really have?
+
+```{r creditgran}
+sample_small_id <- credit_card_balance$SK_ID_CURR %>% sample(10)
+colnames(credit_card_balance)
+credit_indiv_10 <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("AMT"))
+credit_indiv_10_L <- credit_indiv_10 %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+sample_small_id <- credit_card_balance$SK_ID_CURR %>% sample(10)
+colnames(credit_card_balance)
+credit_indiv_10 <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("AMT"))
+credit_indiv_10_L <- credit_indiv_10 %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+sample_small_id <- credit_card_balance$SK_ID_CURR %>% sample(10)
+colnames(credit_card_balance)
+credit_indiv_10 <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("AMT"))
+credit_indiv_10_L <- credit_indiv_10 %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+```
+
+That looks pretty real. How does it compare to the number of purchases?
+
+```{r credituse}
+credit_indiv_10_amt <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("CNT"))
+credit_indiv_10_amt_L <- credit_indiv_10_amt %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_amt_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+```
+
+That cumulative repayments line is really annoying!!  Let's drop it, and have a look at the numbers as dots.
+
+```{r withoutcum}
+
+credit_indiv_10_amt <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("CNT")) %>% 
+  select(-CNT_INSTALMENT_MATURE_CUM) 
+credit_indiv_10_amt_L <- credit_indiv_10_amt %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_amt_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_point()+
+  facet_grid(SK_ID_CURR~.)
+         
+```
+
+
+##Let's check to see whether there could be any significant difference amongst defaulters
+
+
+```{r creditdefaulters}
+sample_small_id_T1 <- credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(TARGET == 1) %>% 
+  pull(SK_ID_CURR) %>% 
+  sample(10)
+credit_indiv_10 <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id_T1) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("AMT"))
+credit_indiv_10_L <- credit_indiv_10 %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+credit_indiv_10_amt <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id_T1) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("CNT")) %>% 
+  select(-CNT_INSTALMENT_MATURE_CUM) 
+credit_indiv_10_amt_L <- credit_indiv_10_amt %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_amt_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_point()+
+  facet_grid(SK_ID_CURR~.)
+
+sample_small_id_T1 <- credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(TARGET == 1) %>% 
+  pull(SK_ID_CURR) %>% 
+  sample(10)
+credit_indiv_10 <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id_T1) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("AMT"))
+credit_indiv_10_L <- credit_indiv_10 %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+credit_indiv_10_amt <- credit_card_balance %>% 
+  filter(SK_ID_CURR %in% sample_small_id_T1) %>% 
+  select(SK_ID_CURR, MONTHS_BALANCE, contains("CNT")) %>% 
+  select(-CNT_INSTALMENT_MATURE_CUM) 
+credit_indiv_10_amt_L <- credit_indiv_10_amt %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, - MONTHS_BALANCE)
+credit_indiv_10_amt_L %>% 
+  ggplot(aes(x = MONTHS_BALANCE, y = Value, col = Key))+
+  geom_point()+
+  facet_grid(SK_ID_CURR~.)
+
+```
+
+## What did we learn?
+
+Hopefully inspired to figure out some good 'per applicant' summary statistics from their history.
+There could be very very many from this kind of data.
+
+Lets quickly check the missed payments on the CCs.
+
+```{r arrearscc}
+
+#skim(credit_card_balance)
+credit_card_balance %>% 
+  head(n = 50000) %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  ggplot(aes(x = SK_DPD, y = AMT_BALANCE, col = as.factor(TARGET)))+
+  geom_point(alpha = 0.5)
+
+credit_card_balance %>% 
+  head(n = 50000) %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  ggplot(aes(x = SK_DPD, y = AMT_BALANCE, col = as.factor(TARGET)))+
+  geom_jitter(alpha = 0.5)+
+  scale_x_continuous(limits = c(0,300))+
+  scale_y_continuous(limits = c(0,50000))
+  
+credit_card_balance %>% 
+  #head(n = 50000) %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(MONTHS_BALANCE > -2) %>% 
+  ggplot(aes(x = SK_DPD, y = AMT_BALANCE, col = as.factor(TARGET)))+
+  geom_point(alpha = 0.5)+
+  scale_x_continuous(limits = c(0,300))+
+  scale_y_continuous(limits = c(0,50000))
+  
+credit_card_balance %>% 
+  #head(n = 50000) %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(MONTHS_BALANCE > -2) %>% 
+  ggplot(aes(x = SK_DPD, y = AMT_BALANCE-AMT_CREDIT_LIMIT_ACTUAL, col = as.factor(TARGET)))+
+  geom_point(alpha = 0.5)
+  #scale_x_continuous(limits = c(0,300))+
+  #scale_y_continuous(limits = c(0,50000))
+
+credit_card_balance %>% 
+  #head(n = 50000) %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(MONTHS_BALANCE > -2) %>% 
+  ggplot(aes(x = SK_DPD, y = AMT_BALANCE-AMT_CREDIT_LIMIT_ACTUAL, col = as.factor(TARGET)))+
+  geom_point(alpha = 0.5)+
+  scale_x_continuous(limits = c(0,100))+
+  scale_y_continuous(limits = c(-25000,25000))
+  
+
+```
+
+## This looks interesting... can we violin?
+
+```{r creditv}
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(MONTHS_BALANCE > -2) %>% 
+  mutate(DPD_flag = case_when(SK_DPD > 0 ~1,
+                              SK_DPD == 0 ~ 0)) %>% 
+  ggplot(aes(x = 1, y = AMT_BALANCE-AMT_CREDIT_LIMIT_ACTUAL, col = as.factor(TARGET)))+
+  geom_violin()+
+  scale_y_continuous(limits = c(-100000, 100000))+
+  facet_grid(.~DPD_flag)
+  
+
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(MONTHS_BALANCE > -2) %>% 
+  mutate(DPD_flag = case_when(SK_DPD > 0 ~1,
+                              SK_DPD == 0 ~ 0)) %>% 
+  ggplot(aes(x = 1, y = AMT_BALANCE-AMT_CREDIT_LIMIT_ACTUAL, col = as.factor(TARGET)))+
+  geom_violin()+
+  scale_y_continuous(limits = c(-10000, 10000))+
+  facet_grid(.~DPD_flag)
+
+```
+
+## Great signal!
+
+But is it enough to worry about?
+
+```{r checknums}
+credit_card_balance %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(MONTHS_BALANCE > -2) %>%
+  mutate(DPD_flag = case_when(SK_DPD > 0 ~1,
+                              SK_DPD == 0 ~ 0)) %>%
+  filter(DPD_flag == 1) %>% 
+  filter(TARGET == 1) %>% 
+  pull(SK_ID_CURR) %>% 
+  unique() %>% 
+  length()
+
+```
+
+## Time to actually summarise the Credit Card Data
+
+```{r creditsumm, cache=T}
+credit_card_balance_summ <- credit_card_balance %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise(hist.length = min(MONTHS_BALANCE),
+            max.lim = max(AMT_CREDIT_LIMIT_ACTUAL),
+            min.lim = min(AMT_CREDIT_LIMIT_ACTUAL),
+            diff.lim = max.lim - min.lim,
+            mean.bal = mean(AMT_BALANCE),
+            mean.count.draw = mean(CNT_DRAWINGS_CURRENT),
+            mean.count.ATM = mean(CNT_DRAWINGS_ATM_CURRENT),
+            sd.bal.med = sd(AMT_BALANCE)/median(AMT_BALANCE),
+            sd.bal = sd(AMT_BALANCE),
+            mean.count.POS = mean(CNT_DRAWINGS_POS_CURRENT),
+            sd.count.POS = sd(CNT_DRAWINGS_POS_CURRENT),
+            draw.frac = mean((AMT_BALANCE - AMT_CREDIT_LIMIT_ACTUAL+1)/(AMT_CREDIT_LIMIT_ACTUAL+1)))
+
+credit_card_balance_summ_1 <- credit_card_balance %>% 
+  filter(MONTHS_BALANCE == -1) %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise(DPD.1 = first(SK_DPD),
+            overlim = case_when(first(AMT_BALANCE) > first(AMT_CREDIT_LIMIT_ACTUAL) ~ 1,
+                                !first(AMT_BALANCE) > first(AMT_CREDIT_LIMIT_ACTUAL) ~0),
+            overdue = case_when(first(SK_DPD) > 0 ~ 1,
+                                !first(SK_DPD) > 0 ~ 0),
+            over.lim.due = overlim*overdue,
+            limdiff = first(AMT_BALANCE)-first(AMT_CREDIT_LIMIT_ACTUAL))
+
+credit_card_balance_summ <- credit_card_balance_summ %>% 
+  inner_join(credit_card_balance_summ_1, by = "SK_ID_CURR") %>% 
+  mutate(has.credit.card = 1)
+
+skim(credit_card_balance_summ)
+
+credit_card_balance_summ %>% 
+  filter(sd.bal.med < 10) %>% 
+  ggplot(aes(x = mean.bal, y = hist.length, col = sd.bal.med))+
+  geom_point(alpha = 0.6)+
+  scale_color_gradientn(colors = rainbow(10))+
+  facet_grid(overdue~overlim)
+
+credit_card_balance_summ %>% 
+  ggplot(aes(x = mean.bal, y = hist.length, col = sd.bal))+
+  geom_point(alpha = 0.6)+
+  scale_color_gradientn(colors = rainbow(10))+
+  facet_grid(overdue~overlim)
+
+```
+
+## Visual inspection always helps, I found:
+
+I had picked the 'max()' of a negative series
+
+The sd() was generally proportional just to the size of the balance
+
+the draw.frac had a bunch of infinites and non-numbers
+
+
+## Time to join on the credit card data and hack again
+
+```{r joincredit, cache=T}
+application_train_train <- application_train_train %>% left_join(credit_card_balance_summ, by = "SK_ID_CURR")
+application_train_test <- application_train_test %>% left_join(credit_card_balance_summ, by = "SK_ID_CURR")
+
+mod_rpart_3 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.0002)
+plotcp(mod_rpart_3)
+mod_rpart_3_p <- prune.rpart(mod_rpart_3, .0004)
+plotcp(mod_rpart_3_p)
+rpart.plot(mod_rpart_3_p)
+summary(mod_rpart_3_p)
+```
+
+## Is it any better?
+
+```{r evaluaterpart3, cache=TRUE}
+prediction <- predict(mod_rpart_3_p, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_3")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_3)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_3)
+```
+
+## Where to next?
+
+There's still plenty on wishlist...
+
+document flags 
+
+occupation types and organisation types (reduce dimensions)
+
+building types
+
+understand relationships between previous and current ids
+
+make a summary for all the other tables
+
+hack some more... with xgboost?
+
+```{r xgboost1, cache=T}
+
+application_train_train <- application_train_train %>% select(-sd.bal.med)
+application_train_test <- application_train_test %>% select(-sd.bal.med)
+ train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE)), application_train_train$TARGET)
+ names(train) <- c("data", "label")
+ test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE)), application_train_test$TARGET)
+ names(test) <- c("data", "label")
+ 
+# checker <- tibble()
+#  for(i in colnames(application_train_train %>% select(-TARGET))){
+#    print(i)
+#    train <- list(sparse.model.matrix(~., data = application_train_train %>% select(i, checker$i, TARGET)), application_train_train$TARGET)
+# adder <- tibble(i)
+#    checker <- checker %>% bind_rows(adder)
+#  }
+
+# colnames(application_train_train) %in% checker$i
+## Here's the mistake coming up, why are the lengths different?
+#  dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+#  dtest <- xgb.DMatrix(data = test$data, label=test$label)
+#  watchlist <- list(train=dtrain, test=dtest)
+# #
+#  model <- xgb.train(data = dtrain, max.depth = 20, booster = "gblinear", eta = .2, nrounds = 15, watchlist = watchlist)
+#
+
+
+```
+
+
+## What about the highly cardinal values
+
+```{r cardinals}
+
+application_train %>% 
+  ggplot(aes(x = DAYS_BIRTH, AMT_INCOME_TOTAL, col = OCCUPATION_TYPE))+
+  geom_point()
+
+application_train %>% 
+  head(n = 20000) %>% 
+  ggplot(aes(x = DAYS_BIRTH, AMT_INCOME_TOTAL, col = OCCUPATION_TYPE))+
+  geom_point()+
+  scale_y_continuous(limits = c(0, 2000000))
+
+application_train_train %>% 
+  ggplot(aes(x = OCCUPATION_TYPE))+
+  geom_bar(stat = "count")+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+application_train_train %>% 
+  ggplot(aes(x = ORGANIZATION_TYPE))+
+  geom_bar(stat = "count")+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+application_train_train %>% 
+  ggplot(aes(x = ORGANIZATION_TYPE, y = OCCUPATION_TYPE, col = as.factor(TARGET)))+
+  geom_jitter()+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+
+```
+
+
+## We need a summary
+
+```{r, cardinalsumm, cache=T}
+cardinal_summ <- application_train_train %>% 
+  group_by(ORGANIZATION_TYPE, OCCUPATION_TYPE) %>% 
+  summarise(TARGET.mean = mean(TARGET),
+            AMT_INCOME_TOTAL.mean = mean(AMT_INCOME_TOTAL),
+            AMT_INCOME_TOTAL.med = median(AMT_INCOME_TOTAL),
+            AMT_ANNUITY.mean = mean(AMT_INCOME_TOTAL),
+            AMT_CREDIT.mean = mean(AMT_CREDIT),
+            DAYS_BIRTH.mean = mean(DAYS_BIRTH),
+            DAYS_EMPLOYED.mean = mean(DAYS_EMPLOYED),
+            CNT_CHILDREN.mean = mean(CNT_CHILDREN),
+            CNT_FAM_MEMBERS.mean = mean(CNT_FAM_MEMBERS),
+            FLAG_EMP_PHONE.mean = mean(FLAG_EMP_PHONE),
+            number = length(AMT_INCOME_TOTAL),
+            FLAG_DOCUMENT_6.mean = mean(FLAG_DOCUMENT_6))
+
+cardinal_summ %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = TARGET.mean, size = number))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))
+
+cardinal_summ %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = TARGET.mean, size = log(number)))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = OCCUPATION_TYPE, size = log(number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = OCCUPATION_TYPE, size = (number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  #filter(str_detect(ORGANIZATION_TYPE, "Trade") == TRUE) %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = ORGANIZATION_TYPE, size = log(number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  filter(str_detect(ORGANIZATION_TYPE, "type") == TRUE) %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = ORGANIZATION_TYPE, size = log(number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  filter(str_detect(ORGANIZATION_TYPE, "type") == FALSE) %>% 
+  ggplot(aes(x = AMT_INCOME_TOTAL.med, y = AMT_CREDIT.mean, col = ORGANIZATION_TYPE, size = log(number)))+
+  geom_point()+
+  #scale_color_gradientn(colours = rainbow(10))+
+  scale_y_continuous(limits = c(0,1500000))+
+  scale_x_continuous(limits = c(20000,300000))
+
+cardinal_summ %>% 
+  ggplot(aes(x = TARGET.mean, y = log10(number), size = (AMT_CREDIT.mean), col = OCCUPATION_TYPE))+
+  geom_point()
+
+cardinal_summ %>% 
+  #filter(DAYS_BIRTH.mean)
+  ggplot(aes(x = TARGET.mean, y = log10(number), size = (AMT_ANNUITY.mean), col = DAYS_BIRTH.mean))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))
+
+cardinal_summ %>% 
+  filter(DAYS_EMPLOYED.mean< 200000) %>% 
+  ggplot(aes(x = TARGET.mean, y = log10(number), size = (AMT_ANNUITY.mean), col = DAYS_EMPLOYED.mean))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))
+
+cardinal_summ %>% 
+  filter(DAYS_EMPLOYED.mean< 200000) %>% 
+  ggplot(aes(x = TARGET.mean, y = log10(number), size = (AMT_ANNUITY.mean), col = DAYS_EMPLOYED.mean))+
+  geom_point(alpha = 0.5)+
+  scale_color_gradientn(colours = rainbow(10))+
+  scale_x_continuous(limits = c(0,.25))
+
+cardinal_summ %>% 
+  filter(number > 80) %>% 
+  filter(DAYS_EMPLOYED.mean < 200000) %>%
+  ggplot(aes(x = OCCUPATION_TYPE, y = ORGANIZATION_TYPE, size = number, col = TARGET.mean))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
+
+```
+
+
+## Now to add suitable variables
+
+A few possibilities...
+
+Bin it into a few categories? (How many?)
+
+Pass the continuous variable
+
+Omit small data-points?
+
+```{r cardsumfeatures}
+
+cardinal_summ <- cardinal_summ %>% 
+  mutate(jobrisk = case_when(number < 80 ~ "lowdata",
+                             number >= 80 & TARGET.mean < 0.05 ~ "LOW",
+                             number >= 80 & TARGET.mean >=0.05 & TARGET.mean < 0.1 ~ "MED",
+                             number >= 80 & TARGET.mean >=0.1 & TARGET.mean < 0.15 ~ "HIGH",
+                             number >= 80 & TARGET.mean >=0.15 ~ "VHIGH"),
+         oddjob = case_when(number < 50 ~ 1,
+                            number >= 50 ~0))
+
+application_train_train <- application_train_train %>% 
+  left_join(cardinal_summ, by = c("OCCUPATION_TYPE", "ORGANIZATION_TYPE"))
+application_train_test <- application_train_test %>% 
+  left_join(cardinal_summ, by = c("OCCUPATION_TYPE", "ORGANIZATION_TYPE"))
+
+application_train_train %>% glimpse()
+
+```
+
+## Now to see if it gets into the decision tree
+
+```{r cardtesting, cache=T}
+mod_rpart_4 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.0002)
+plotcp(mod_rpart_4)
+summary(mod_rpart_4)
+mod_rpart_4_p <- prune.rpart(mod_rpart_4, .0003)
+plotcp(mod_rpart_4_p)
+rpart.plot(mod_rpart_4_p)
+summary(mod_rpart_4_p)
+
+```
+
+## Target.mean wins!.
+
+But maybe lets check how it works in evaluation?
+
+```{r evaluaterpart4, cache=TRUE}
+prediction <- predict(mod_rpart_4, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_4")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_4)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_4)
+```
+
+## And the pruned version?
+
+```{r evaluaterpart4P, cache=TRUE}
+prediction <- predict(mod_rpart_4_p, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_4_P")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_4_P)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_4_P)
+```
+
+## Not bad! Could we reduce some data?
+
+It's not certain that this will help, it's likely it will in a boosted model, but for a single tree, just curious.
+
+```{r cardtestingmore, cache=T}
+mod_rpart_5 <- rpart(data = application_train_train %>% select(-ORGANIZATION_TYPE, -OCCUPATION_TYPE), formula = TARGET ~., cp = 0.0002)
+plotcp(mod_rpart_5)
+summary(mod_rpart_5)
+mod_rpart_5_p <- prune.rpart(mod_rpart_5, .00025)
+plotcp(mod_rpart_5_p)
+rpart.plot(mod_rpart_5_p)
+summary(mod_rpart_5_p)
+
+```
+
+But maybe lets check how it works in evaluation?
+
+```{r evaluaterpart5, cache=TRUE}
+prediction <- predict(mod_rpart_5, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_5")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_5)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_5)
+```
+
+## BOOM!  And the pruned version?
+
+```{r evaluaterpart5P, cache=TRUE}
+prediction <- predict(mod_rpart_5_p, newdata = application_train_test %>% select(-TARGET))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_5_P")
+application_train_test <- application_train_test %>% bind_cols(prediction)
+head(application_train_test$Predicted_TARGET_5_P)
+roc(response = application_train_test$TARGET, predictor = application_train_test$Predicted_TARGET_5_P)
+```
+
+## That's great news!
+
+We can derive a factor variable with five levels and a continuous variable which outperforms two variables with high cardinality.  
