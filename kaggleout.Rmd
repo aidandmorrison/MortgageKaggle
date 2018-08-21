@@ -60,9 +60,9 @@ Note that the `echo = FALSE` parameter was added to the code chunk to prevent pr
 application_train_train_id <- application_train$SK_ID_CURR %>% sample(250000)
 application_train_train <- application_train %>% filter(SK_ID_CURR %in% application_train_train_id)
 application_train_test <- application_train %>% filter(!SK_ID_CURR %in% application_train_train_id)
-mod_rpart_1 <- rpart(data = application_train_train, formula = TARGET ~.)
-mod_rpart_1 %>% summary()
-plotcp(mod_rpart_1)
+#mod_rpart_1 <- rpart(data = application_train_train, formula = TARGET ~.)
+#mod_rpart_1 %>% summary()
+#plotcp(mod_rpart_1)
 ```
 ```{r plotrpart}
 rpart.plot(mod_rpart_1)
@@ -70,8 +70,8 @@ rpart.plot(mod_rpart_1)
 
 ## Maybe we can force a larger tree?
 ```{r rpart2, cache=TRUE}
-mod_rpart_2 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.001)
-plotcp(mod_rpart_2)
+#mod_rpart_2 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.001)
+#plotcp(mod_rpart_2)
 ```
 ```{r plotrpart2}
 rpart.plot(mod_rpart_2)
@@ -545,12 +545,12 @@ the draw.frac had a bunch of infinites and non-numbers
 application_train_train <- application_train_train %>% left_join(credit_card_balance_summ, by = "SK_ID_CURR")
 application_train_test <- application_train_test %>% left_join(credit_card_balance_summ, by = "SK_ID_CURR")
 
-mod_rpart_3 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.0002)
-plotcp(mod_rpart_3)
-mod_rpart_3_p <- prune.rpart(mod_rpart_3, .0004)
-plotcp(mod_rpart_3_p)
-rpart.plot(mod_rpart_3_p)
-summary(mod_rpart_3_p)
+# mod_rpart_3 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.0002)
+# plotcp(mod_rpart_3)
+# mod_rpart_3_p <- prune.rpart(mod_rpart_3, .0004)
+# plotcp(mod_rpart_3_p)
+# rpart.plot(mod_rpart_3_p)
+# summary(mod_rpart_3_p)
 ```
 
 ## Is it any better?
@@ -749,13 +749,13 @@ application_train_train %>% glimpse()
 ## Now to see if it gets into the decision tree
 
 ```{r cardtesting, cache=T}
-mod_rpart_4 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.0002)
-plotcp(mod_rpart_4)
-summary(mod_rpart_4)
-mod_rpart_4_p <- prune.rpart(mod_rpart_4, .0003)
-plotcp(mod_rpart_4_p)
-rpart.plot(mod_rpart_4_p)
-summary(mod_rpart_4_p)
+# mod_rpart_4 <- rpart(data = application_train_train, formula = TARGET ~., cp = 0.0002)
+# plotcp(mod_rpart_4)
+# summary(mod_rpart_4)
+# mod_rpart_4_p <- prune.rpart(mod_rpart_4, .0003)
+# plotcp(mod_rpart_4_p)
+# rpart.plot(mod_rpart_4_p)
+# summary(mod_rpart_4_p)
 
 ```
 
@@ -788,13 +788,13 @@ roc(response = application_train_test$TARGET, predictor = application_train_test
 It's not certain that this will help, it's likely it will in a boosted model, but for a single tree, just curious.
 
 ```{r cardtestingmore, cache=T}
-mod_rpart_5 <- rpart(data = application_train_train %>% select(-ORGANIZATION_TYPE, -OCCUPATION_TYPE), formula = TARGET ~., cp = 0.0002)
-plotcp(mod_rpart_5)
-summary(mod_rpart_5)
-mod_rpart_5_p <- prune.rpart(mod_rpart_5, .00025)
-plotcp(mod_rpart_5_p)
-rpart.plot(mod_rpart_5_p)
-summary(mod_rpart_5_p)
+# mod_rpart_5 <- rpart(data = application_train_train %>% select(-ORGANIZATION_TYPE, -OCCUPATION_TYPE), formula = TARGET ~., cp = 0.0002)
+# plotcp(mod_rpart_5)
+# summary(mod_rpart_5)
+# mod_rpart_5_p <- prune.rpart(mod_rpart_5, .00025)
+# plotcp(mod_rpart_5_p)
+# rpart.plot(mod_rpart_5_p)
+# summary(mod_rpart_5_p)
 
 ```
 
@@ -837,7 +837,7 @@ application_train_test <- application_train_test %>% filter(!number == -10000000
 ### Without the highly cardinal features
  train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), application_train_train$TARGET)
  names(train) <- c("data", "label")
- test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"), -.)), application_train_test$TARGET)
+ test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), application_train_test$TARGET)
  names(test) <- c("data", "label")
  
 ### Including the cardinals
@@ -856,17 +856,17 @@ application_train_test <- application_train_test %>% filter(!number == -10000000
 
 #colnames(application_train_train) %in% checker$i
  
- ### heaps of testing to debug all the matrix objects
-#  testvec <- colnames(application_train_test) %in% colnames(application_train_train) %>% tibble()
-#  colnames(testvec) <- c("included")
-#  namesvec <- colnames(application_train_test) %>% tibble()
-#  colnames(namesvec) <- c("names")
-# testvec <- testvec %>% bind_cols(namesvec)
-# testvec %>% filter(included == F) %>% print()
+## heaps of testing to debug all the matrix objects
+ testvec <- colnames(application_train_train) %in% colnames(application_train_test) %>% tibble()
+ colnames(testvec) <- c("included")
+ namesvec <- colnames(application_train_train) %>% tibble()
+ colnames(namesvec) <- c("names")
+testvec <- testvec %>% bind_cols(namesvec)
+testvec %>% filter(included == F) %>% print()
 
 # application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique() == application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique()
 # 
- test[["data"]]@Dimnames[[2]] %in% train[["data"]]@Dimnames[[2]]
+ train[["data"]]@Dimnames[[2]] %in%  test[["data"]]@Dimnames[[2]]  #%>% unique()
 # 
 # strange <-  application_train_test %>% filter(jobrisk == "-1e+07") 
 # 
