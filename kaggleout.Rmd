@@ -1170,7 +1170,7 @@ Mode <- function(x) {
 }
 
 installments_summ_prev <- installments_payments %>%
-  head(n = 500000) %>% 
+  #head(n = 500000) %>% 
   left_join(application_train, by = "SK_ID_CURR") %>% 
   mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
          DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>%
@@ -1198,7 +1198,7 @@ installments_summ_prev <- installments_payments %>%
 
 installments_summ_prev_flow <- installments_payments %>% 
   left_join(installments_summ_prev, by = "SK_ID_PREV") %>% 
-  head(n = 500000) %>% 
+  #head(n = 500000) %>% 
   group_by(SK_ID_PREV) %>% 
   arrange(DAYS_INSTALMENT) %>% 
   mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
@@ -1219,13 +1219,13 @@ installments_summ_prev <- installments_summ_prev %>%
 
 #skim(installments_summ_prev)
 
-installments_summ_prev %>% 
-  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>% 
-  left_join(TARGET, by = "SK_ID_CURR") %>% 
-  ggplot(aes(x = AMT.diff.grad, y = AMT_INSTALMENT.rel.income, col = AMT_PAYMENT.mean ))+
-  geom_point()+
-  scale_color_gradientn(colours = rainbow(10))+
-  facet_grid(TARGET~DAYS.diff.grad.sign)
+# installments_summ_prev %>% 
+#   left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>% 
+#   left_join(TARGET, by = "SK_ID_CURR") %>% 
+#   ggplot(aes(x = AMT.diff.grad, y = AMT_INSTALMENT.rel.income, col = AMT_PAYMENT.mean ))+
+#   geom_point()+
+#   scale_color_gradientn(colours = rainbow(10))+
+#   facet_grid(TARGET~DAYS.diff.grad.sign)
 
 ```
 
@@ -1281,7 +1281,7 @@ installments_summ_prev %>%
 
 ```{r finalinstallsumm}
 
-skim(installments_summ_prev)
+#skim(installments_summ_prev)
 
 installments_summ_index_last <- installments_summ_prev %>% 
   left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>%
@@ -1339,6 +1339,8 @@ installments_summ_length <- installments_summ_prev %>%
 colnames(installments_summ_length) <- colnames(installments_summ_length) %>% paste0(.,".length")
 colnames(installments_summ_length)[25] <- "SK_ID_CURR"
 
+installments_summ_length$SK_ID_PREV %>% unique() %>% length()
+
 installments_summ_short <- installments_summ_prev %>% 
   filter(SK_ID_PREV %in% installments_summ_index_short$SK_ID_PREV) %>% 
   select(-SK_ID_PREV)
@@ -1351,10 +1353,15 @@ loan_count <- installments_summ_prev %>%
 
 glimpse(loan_count)
 
-installments_summ_master <- installments_summ_index_last %>% 
-  inner_join(installments_summ_index_length, by = "SK_ID_CURR") %>% 
-  inner_join(installments_summ_index_payment, by = "SK_ID_CURR") %>% 
-  inner_join(installments_summ_index_short, by = "SK_ID_CURR") %>% 
+installments_summ_master <- installments_summ_last %>% 
+  inner_join(installments_summ_length, by = "SK_ID_CURR") %>% 
+  inner_join(installments_summ_payment, by = "SK_ID_CURR") %>% 
+  inner_join(installments_summ_short, by = "SK_ID_CURR") %>% 
   inner_join(loan_count, by = "SK_ID_CURR") 
 
+installments_summ_prev %>%
+  mutate(SK_ID_CURR = as.factor(SK_ID_CURR),
+         SK_ID_PREV = as.factor(SK_ID_PREV)) %>% 
+  head(n = 50000) %>% 
+  skim()
 ```
