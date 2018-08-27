@@ -835,9 +835,9 @@ application_train_test <- application_train_test %>% filter(!number == -10000000
 
 
 ### Without the highly cardinal features
- train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), application_train_train$TARGET)
+ train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, - NAME_FAMILY_STATUS, - NAME_INCOME_TYPE, -contains("Predicted_TARGET"))), application_train_train$TARGET)
  names(train) <- c("data", "label")
- test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), application_train_test$TARGET)
+ test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE,- NAME_FAMILY_STATUS, - NAME_INCOME_TYPE, -contains("Predicted_TARGET"))), application_train_test$TARGET)
  names(test) <- c("data", "label")
  
 ### Including the cardinals
@@ -867,6 +867,7 @@ testvec %>% filter(included == F) %>% print()
 # application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique() == application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique()
 # 
  train[["data"]]@Dimnames[[2]] %in%  test[["data"]]@Dimnames[[2]]  #%>% unique()
+ 
 # 
 # strange <-  application_train_test %>% filter(jobrisk == "-1e+07") 
 # 
@@ -913,5 +914,447 @@ imp %>%
 # roc(response = application_train_test$TARGET, predictor = prediction$Predicted_TARGET_xgb_lin)
 #  
 
+
+```
+
+How about we quickly explore the payments data
+
+```{r explorpayments}
+installments_payments %>% colnames()
+installments_payments %>% skim()
+currentids <- installments_payments$SK_ID_CURR %>% unique()
+pastids <- installments_payments$SK_ID_PREV %>% unique()
+
+pastids %in% currentids %>% sum()
+
+currentids %>% length()
+pastids %>% length()
+
+# installments_payments %>% 
+#   head(n = 2000000) %>% 
+#   ggplot(aes(x = SK_ID_PREV, y = SK_ID_CURR, col = as.numeric(NUM_INSTALMENT_NUMBER)))+
+#   geom_point() +
+#   scale_colour_gradientn(colours = rainbow(10))
+
+installments_payments %>% 
+  head(n = 1000000) %>% 
+  ggplot(aes(x = DAYS_INSTALMENT, y = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT, col = NUM_INSTALMENT_NUMBER))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))
+
+installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  head(n = 1000000) %>%
+  ggplot(aes(x = DAYS_INSTALMENT, y = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT, col = NUM_INSTALMENT_NUMBER))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  facet_grid(.~TARGET)
+
+installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  head(n = 1000000) %>%
+  ggplot(aes(x = DAYS_INSTALMENT, y = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT, col = NUM_INSTALMENT_NUMBER))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  facet_grid(.~TARGET)
+
+installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  head(n = 100000) %>%
+  ggplot(aes(x = AMT_INSTALMENT, y = AMT_PAYMENT , col = DAYS_INSTALMENT))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  facet_grid(.~TARGET)+
+  scale_x_continuous(limits = c(-10000,800000))+
+  scale_y_continuous(limits = c(-10000,800000))
+  
+installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  head(n = 100000) %>%
+  ggplot(aes(x = AMT_INSTALMENT, y = AMT_PAYMENT , col = DAYS_INSTALMENT))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  facet_grid(.~TARGET)+
+  scale_x_continuous(limits = c(-10000,80000))+
+  scale_y_continuous(limits = c(-10000,80000))
+  
+installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  head(n = 100000) %>%
+  ggplot(aes(x = AMT_INSTALMENT, y = AMT_PAYMENT , col = DAYS_INSTALMENT))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  facet_grid(.~TARGET)+
+  scale_x_continuous(limits = c(-1000,8000))+
+  scale_y_continuous(limits = c(-1000,8000))
+  
+
+```
+
+It looks like there's a group of people who will pay off their loan in an installment, perhaps when it's close to being done.  And another group who tend to to pay a bit extra.  And the majority pay exactly the right amount, and a few not enough.  ALso people tend to be only a bit early, but can be quite late. I wonder how these two overlap.
+
+```{r moreinstallments}
+installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
+         DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>% 
+  head(n = 1000000) %>% 
+  ggplot(aes(x = DAYS.diff, y = AMT.diff, col = DAYS_INSTALMENT))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+    scale_x_continuous(limits = c(-100,100))+
+  scale_y_continuous(limits = c(-100000,200000))+
+  facet_grid(TARGET~.)
+
+installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(DAYS_INSTALMENT > -100) %>% 
+  mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
+         DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>% 
+  head(n = 1000000) %>% 
+  ggplot(aes(x = DAYS.diff, y = AMT.diff, col = DAYS_INSTALMENT))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+    scale_x_continuous(limits = c(-100,100))+
+  scale_y_continuous(limits = c(-100000,200000))+
+  facet_grid(TARGET~.)
+
+
+```
+
+Still not a lot of clarity here.   Perhaps we should look at some individual credit records to see, with time along the x axis.
+
+```{r installmentsindiv}
+sample_small_id <- installments_payments$SK_ID_CURR %>% sample(10)
+
+installments_long_samp <- installments_payments %>% 
+  filter(SK_ID_CURR %in% sample_small_id) %>% 
+  mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
+         DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, -SK_ID_PREV, -NUM_INSTALMENT_VERSION, -NUM_INSTALMENT_NUMBER, -DAYS_INSTALMENT)
+
+
+installments_long_samp %>% 
+  filter(!Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = NUM_INSTALMENT_NUMBER, y = Value, col = Key))+
+  geom_point()+
+  facet_grid(SK_ID_CURR~.)
+
+installments_long_samp %>% 
+  filter(Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = DAYS_INSTALMENT, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+installments_long_samp %>% 
+  filter(Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = NUM_INSTALMENT_NUMBER, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+sample_small_id_T1 <- installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(TARGET == 1) %>% 
+  pull(SK_ID_CURR) %>% 
+  sample(10)
+
+installments_long_samp_T <- installments_payments %>% 
+  filter(SK_ID_CURR %in% sample_small_id_T1) %>% 
+  mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
+         DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, -SK_ID_PREV, -NUM_INSTALMENT_VERSION, -NUM_INSTALMENT_NUMBER, -DAYS_INSTALMENT)
+
+
+installments_long_samp_T %>% 
+  filter(!Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = NUM_INSTALMENT_NUMBER, y = Value, col = as.factor(SK_ID_PREV)))+
+  geom_point()+
+  facet_grid(SK_ID_CURR~.)
+
+installments_long_samp_T %>% 
+  filter(Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = DAYS_INSTALMENT, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+installments_long_samp_T %>% 
+  filter(Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = NUM_INSTALMENT_NUMBER, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_CURR~.)
+
+# installments_long_samp_T %>% 
+#   group_by(SK_ID_CURR) %>% 
+#   pull(SK_ID_PREV) %>% 
+#   unique()
+
+
+
+```
+
+
+Let's look at individual loan products
+
+```{r installmentsindiv2}
+sample_small_id <- installments_payments$SK_ID_PREV %>% sample(10)
+
+installments_long_samp <- installments_payments %>% 
+  filter(SK_ID_PREV %in% sample_small_id) %>% 
+  mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
+         DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>% 
+  gather(key = "Key", value = "Value", -SK_ID_CURR, -SK_ID_PREV, -NUM_INSTALMENT_VERSION, -NUM_INSTALMENT_NUMBER, -DAYS_INSTALMENT)
+
+
+installments_long_samp %>% 
+  filter(!Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = NUM_INSTALMENT_NUMBER, y = Value, col = Key))+
+  geom_point()+
+  facet_grid(SK_ID_PREV~.)
+
+installments_long_samp %>% 
+  filter(Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = DAYS_INSTALMENT, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_PREV~.)
+
+installments_long_samp %>% 
+  filter(Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = NUM_INSTALMENT_NUMBER, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_PREV~.)
+
+sample_small_id_T1 <- installments_payments %>% 
+  inner_join(TARGET, by = "SK_ID_CURR") %>% 
+  filter(TARGET == 1) %>% 
+  pull(SK_ID_PREV) %>% 
+  sample(10)
+
+installments_long_samp_T <- installments_payments %>% 
+  filter(SK_ID_PREV %in% sample_small_id_T1) %>% 
+  mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
+         DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>% 
+  gather(key = "Key", value = "Value", -SK_ID_PREV, -SK_ID_PREV, -NUM_INSTALMENT_VERSION, -NUM_INSTALMENT_NUMBER, -DAYS_INSTALMENT)
+
+
+installments_long_samp_T %>% 
+  filter(!Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT", "SK_ID_CURR")) %>% 
+  ggplot(aes(x = NUM_INSTALMENT_NUMBER, y = Value, col = as.factor(Key)))+
+  geom_point()+
+  facet_grid(SK_ID_PREV~.)
+
+installments_long_samp_T %>% 
+  filter(Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = DAYS_INSTALMENT, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_PREV~.)
+
+installments_long_samp_T %>% 
+  filter(Key %in% c("AMT_PAYMENT", "AMT.diff", "AMT_INSTALMENT")) %>% 
+  ggplot(aes(x = NUM_INSTALMENT_NUMBER, y = Value, col = Key))+
+  geom_line()+
+  facet_grid(SK_ID_PREV~.)
+
+# installments_long_samp_T %>% 
+#   group_by(SK_ID_PREV) %>% 
+#   pull(SK_ID_PREV) %>% 
+#   unique()
+
+```
+
+Need to do summaries of each loan product (SK_ID_PREV), then for each SK_ID_CURR.
+
+```{r installmentssummaries_prev}
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+installments_summ_prev <- installments_payments %>%
+  head(n = 500000) %>% 
+  left_join(application_train, by = "SK_ID_CURR") %>% 
+  mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
+         DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>%
+  mutate(AMT_INSTALMENT.rel.income = AMT_INSTALMENT/(AMT_INCOME_TOTAL+1)) %>% 
+  group_by(SK_ID_PREV) %>% 
+  summarise(AMT_PAYMENT.mean = mean(AMT_PAYMENT),
+            AMT_PAYMENT.sd = sd(AMT_PAYMENT),
+            PAYMENT.last = max(DAYS_ENTRY_PAYMENT),
+            LOAN.length = max(DAYS_INSTALMENT) - min(DAYS_INSTALMENT),
+            AMT_INSTALMENT.rel.income = mean(AMT_INSTALMENT.rel.income),
+            AMT.diff.mean = mean(AMT.diff),
+            DAYS.diff.mean = mean(AMT.diff),
+            AMT.diff.max = max(AMT.diff),
+            DAYS.diff.max = max(AMT.diff),
+            AMT.diff.min = min(AMT.diff),
+            DAYS.diff.min = min(AMT.diff),
+            AMT.diff.sd = sd(AMT.diff),
+            INSTALMENT.rel.sd = sd(AMT_INSTALMENT.rel.income, na.rm = T),
+            DAYS.diff.sd = sd(DAYS.diff),
+            AMT.diff.rel.income = mean(AMT.diff/(AMT_INCOME_TOTAL+1)),
+            DAYS.diff.rel.employed = mean(DAYS.diff/(DAYS_EMPLOYED +1)),
+            LOAN.length.rel.employed = mean(LOAN.length/DAYS_EMPLOYED))
+
+
+
+installments_summ_prev_flow <- installments_payments %>% 
+  left_join(installments_summ_prev, by = "SK_ID_PREV") %>% 
+  head(n = 500000) %>% 
+  group_by(SK_ID_PREV) %>% 
+  arrange(DAYS_INSTALMENT) %>% 
+  mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
+         DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT,
+         AMT_PAYMENT.step = AMT_PAYMENT - lag(AMT_PAYMENT),
+         AMT.diff.step = AMT.diff - lag(AMT.diff),
+         DAYS.diff.step = DAYS.diff - lag(DAYS.diff)) %>% 
+  summarise(AMT_PAYMENT.grad = mean(AMT_PAYMENT.step, na.rm = T),
+            AMT_PAYMENT.grad.sign = Mode(sign(AMT_PAYMENT.step)),
+            AMT.diff.grad = mean(AMT.diff.step, na.rm = T),
+            AMT.diff.grad.sign = Mode(sign(AMT.diff.step)),
+            DAYS.diff.grad = mean(DAYS.diff.step, na.rm = T),
+            DAYS.diff.grad.sign = Mode(sign(DAYS.diff.step)),
+            AMT_PAYMENT.step.last = last(AMT_PAYMENT.step))
+
+installments_summ_prev <- installments_summ_prev %>% 
+  inner_join(installments_summ_prev_flow, by = "SK_ID_PREV")
+
+#skim(installments_summ_prev)
+
+installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>% 
+  left_join(TARGET, by = "SK_ID_CURR") %>% 
+  ggplot(aes(x = AMT.diff.grad, y = AMT_INSTALMENT.rel.income, col = AMT_PAYMENT.mean ))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  facet_grid(TARGET~DAYS.diff.grad.sign)
+
+```
+
+Still nothing obvious, maybe see what rpart has to say?
+
+```{r installtestingmore, cache=T}
+install_trainset <- installments_summ_prev$SK_ID_PREV %>% unique() %>% sample(140000)
+
+install_train <- installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>% 
+  filter(SK_ID_PREV %in% install_trainset) %>% 
+  left_join(TARGET, by = "SK_ID_CURR") 
+
+install_test <- installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>% 
+  filter(!SK_ID_PREV %in% install_trainset) %>% 
+  left_join(TARGET, by = "SK_ID_CURR") 
+
+mod_rpart_install <- rpart(data = install_train %>% select(-SK_ID_CURR, - SK_ID_PREV), formula = TARGET ~., cp = 0.0002)
+plotcp(mod_rpart_install)
+summary(mod_rpart_install)
+
+
+```
+
+```{r evaluaterpartinstall, cache=TRUE}
+prediction <- predict(mod_rpart_install, newdata = install_test %>% select(-TARGET, - SK_ID_PREV, - SK_ID_CURR))
+prediction <- prediction %>% data.frame()
+colnames(prediction) <- c("Predicted_TARGET_INS2")
+install_test <- install_test %>% bind_cols(prediction)
+head(install_test$Predicted_TARGET_INS2)
+roc(response = install_test$TARGET, predictor = install_test$Predicted_TARGET_INS2)
+```
+
+So it appears that we can get some slight predictive power (very slight) from individual loans.
+
+Time to build a summary for the individual loan applicant. 
+
+Maybe first just check to see how many loans most people have had?
+
+```{r instalchecksum}
+
+installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>%
+  group_by(SK_ID_CURR) %>% 
+  summarise(loans = length(unique(SK_ID_PREV))) %>% 
+  ggplot(aes(x = loans))+
+  geom_histogram(binwidth = 1)
+  
+
+```
+
+
+```{r finalinstallsumm}
+
+skim(installments_summ_prev)
+
+installments_summ_index_last <- installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>%
+  group_by(SK_ID_CURR) %>% 
+  arrange((PAYMENT.last)) %>% 
+  summarise(SK_ID_PREV = last(SK_ID_PREV))
+
+installments_summ_index_payment <- installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>%
+  group_by(SK_ID_CURR) %>% 
+  arrange((AMT_PAYMENT.mean)) %>% 
+  summarise(SK_ID_PREV = last(SK_ID_PREV))
+
+installments_summ_index_length <- installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>%
+  group_by(SK_ID_CURR) %>% 
+  arrange((LOAN.length)) %>% 
+  summarise(SK_ID_PREV = last(SK_ID_PREV))
+
+installments_summ_index_short <- installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV") %>%
+  group_by(SK_ID_CURR) %>% 
+  arrange(desc(LOAN.length)) %>% 
+  summarise(SK_ID_PREV = last(SK_ID_PREV))
+
+# testvector <- colnames(installments_summ_prev)
+# 
+# testvector <- testvector %>% paste0("tester",.)
+
+# installments_summ_prev %>%
+#   filter(SK_ID_PREV %in% installments_summ_index_length$SK_ID_PREV) %>% 
+#   summarise(payment = mean(LOAN.length))
+
+installments_summ_index_last$SK_ID_PREV %in% installments_summ_index_length$SK_ID_PREV %>% sum()
+installments_summ_index_payment$SK_ID_PREV %in% installments_summ_index_short$SK_ID_PREV %>% sum()
+
+installments_summ_prev <- installments_summ_prev %>% 
+  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV")
+
+installments_summ_last <- installments_summ_prev %>% 
+  filter(SK_ID_PREV %in% installments_summ_index_last$SK_ID_PREV) %>% 
+  select(-SK_ID_PREV)
+colnames(installments_summ_last) <- colnames(installments_summ_last) %>% paste0(.,".last")
+colnames(installments_summ_last)[25] <- "SK_ID_CURR"
+
+installments_summ_payment <- installments_summ_prev %>% 
+  filter(SK_ID_PREV %in% installments_summ_index_payment$SK_ID_PREV) %>% 
+  select(-SK_ID_PREV)
+colnames(installments_summ_payment) <- colnames(installments_summ_payment) %>% paste0(.,".payment")
+colnames(installments_summ_payment)[25] <- "SK_ID_CURR"
+
+installments_summ_length <- installments_summ_prev %>% 
+  filter(SK_ID_PREV %in% installments_summ_index_length$SK_ID_PREV) %>% 
+  select(-SK_ID_PREV)
+colnames(installments_summ_length) <- colnames(installments_summ_length) %>% paste0(.,".length")
+colnames(installments_summ_length)[25] <- "SK_ID_CURR"
+
+installments_summ_short <- installments_summ_prev %>% 
+  filter(SK_ID_PREV %in% installments_summ_index_short$SK_ID_PREV) %>% 
+  select(-SK_ID_PREV)
+colnames(installments_summ_short) <- colnames(installments_summ_short) %>% paste0(.,".short")
+colnames(installments_summ_short)[25] <- "SK_ID_CURR"
+
+loan_count <- installments_summ_prev %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise(NUMBER_LOANS_install = SK_ID_PREV %>% unique() %>% length())
+
+glimpse(loan_count)
+
+installments_summ_master <- installments_summ_index_last %>% 
+  inner_join(installments_summ_index_length, by = "SK_ID_CURR") %>% 
+  inner_join(installments_summ_index_payment, by = "SK_ID_CURR") %>% 
+  inner_join(installments_summ_index_short, by = "SK_ID_CURR") %>% 
+  inner_join(loan_count, by = "SK_ID_CURR") 
 
 ```
