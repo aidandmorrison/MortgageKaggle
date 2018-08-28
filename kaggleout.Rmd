@@ -835,10 +835,14 @@ application_train_test <- application_train_test %>% filter(!number == -10000000
 
 
 ### Without the highly cardinal features
- train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, - NAME_FAMILY_STATUS, - NAME_INCOME_TYPE, -contains("Predicted_TARGET"))), application_train_train$TARGET)
+ train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET,  -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET")) %>%  filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown")), application_train_train %>% filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown") %>%  pull(TARGET))
  names(train) <- c("data", "label")
- test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -OCCUPATION_TYPE, -ORGANIZATION_TYPE,- NAME_FAMILY_STATUS, - NAME_INCOME_TYPE, -contains("Predicted_TARGET"))), application_train_test$TARGET)
+ test <- list(sparse.model.matrix( ~ ., data = application_train_test %>% select(-TARGET, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), application_train_test$TARGET)
  names(test) <- c("data", "label")
+ 
+ ### potential problem vars
+ # - NAME_FAMILY_STATUS, - NAME_INCOME_TYPE, -OWN_CAR_AGE,
+ 
  
 ### Including the cardinals
  #  train <- list(sparse.model.matrix(~., data = application_train_train %>% select(-TARGET, -OWN_CAR_AGE,  -contains("Predicted_TARGET"))), application_train_train$TARGET)
@@ -1215,7 +1219,7 @@ installments_summ_prev_flow <- installments_payments %>%
             AMT_PAYMENT.step.last = last(AMT_PAYMENT.step))
 
 installments_summ_prev <- installments_summ_prev %>% 
-  inner_join(installments_summ_prev_flow, by = "SK_ID_PREV")
+  left_join(installments_summ_prev_flow, by = "SK_ID_PREV")
 
 #skim(installments_summ_prev)
 
@@ -1318,8 +1322,12 @@ installments_summ_index_short <- installments_summ_prev %>%
 installments_summ_index_last$SK_ID_PREV %in% installments_summ_index_length$SK_ID_PREV %>% sum()
 installments_summ_index_payment$SK_ID_PREV %in% installments_summ_index_short$SK_ID_PREV %>% sum()
 
+SK_KEY <- installments_payments %>% 
+  group_by(SK_ID_PREV) %>% 
+  summarise(SK_ID_CURR = first(SK_ID_CURR))
+
 installments_summ_prev <- installments_summ_prev %>% 
-  left_join(installments_payments %>% select(SK_ID_CURR, SK_ID_PREV), by = "SK_ID_PREV")
+  left_join(SK_KEY, by = "SK_ID_PREV")
 
 installments_summ_last <- installments_summ_prev %>% 
   filter(SK_ID_PREV %in% installments_summ_index_last$SK_ID_PREV) %>% 
@@ -1354,14 +1362,62 @@ loan_count <- installments_summ_prev %>%
 glimpse(loan_count)
 
 installments_summ_master <- installments_summ_last %>% 
-  inner_join(installments_summ_length, by = "SK_ID_CURR") %>% 
-  inner_join(installments_summ_payment, by = "SK_ID_CURR") %>% 
-  inner_join(installments_summ_short, by = "SK_ID_CURR") %>% 
-  inner_join(loan_count, by = "SK_ID_CURR") 
+  left_join(installments_summ_length, by = "SK_ID_CURR") %>% 
+  left_join(installments_summ_payment, by = "SK_ID_CURR") %>% 
+  left_join(installments_summ_short, by = "SK_ID_CURR") %>% 
+  left_join(loan_count, by = "SK_ID_CURR") 
+```
 
-installments_summ_prev %>%
-  mutate(SK_ID_CURR = as.factor(SK_ID_CURR),
-         SK_ID_PREV = as.factor(SK_ID_PREV)) %>% 
-  head(n = 50000) %>% 
-  skim()
+```{r xgbinstall}
+
+application_train_train. <- application_train_train %>% 
+  left_join(installments_summ_master, by = "SK_ID_CURR")
+
+application_train_test. <- application_train_test %>% 
+  left_join(installments_summ_master, by = "SK_ID_CURR")
+
+skim(application_train_train.)
+
+application_train_train.[is.na(application_train_train.)] <- -10000000
+application_train_test.[is.na(application_train_test.)] <- -10000000
+
+### Without the highly cardinal features
+ train <- list(sparse.model.matrix(~., data = application_train_train. %>% select(-TARGET,  -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET")) %>%  filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown")), application_train_train. %>% filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown") %>%  pull(TARGET))
+ names(train) <- c("data", "label")
+ test <- list(sparse.model.matrix( ~ ., data = application_train_test. %>% select(-TARGET, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), application_train_test.$TARGET)
+ names(test) <- c("data", "label")
+ 
+ ### potential problem vars
+ # - NAME_FAMILY_STATUS, - NAME_INCOME_TYPE, -OWN_CAR_AGE,
+
+# application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique() == application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique()
+# 
+ train[["data"]]@Dimnames[[2]] %in%  test[["data"]]@Dimnames[[2]]  #%>% unique()
+ 
+ 
+ dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+ dtest <- xgb.DMatrix(data = test$data, label=test$label)
+ watchlist <- list(train=dtrain, test=dtest)
+#
+ #mod_xgb_lin <- xgb.train(data = dtrain, booster = "gblinear",  nrounds = 50, watchlist = watchlist)
+ mod_xgb_tree_inst <- xgb.train(data = dtrain,  booster = "gbtree", eta = .05, nrounds = 300, watchlist = watchlist)
+
+ 
+prediction <- predict(mod_xgb_tree_inst, test$data) %>% tibble()
+colnames(prediction) <- c("Predicted_TARGET_xgb_tree_inst")
+application_train_test. <- application_train_test. %>% bind_cols(prediction)
+head(application_train_test.$Predicted_TARGET_xgb_tree_inst)
+roc(response = application_train_test.$TARGET, predictor = prediction$Predicted_TARGET_xgb_tree_inst)
+
+imp <- xgb.importance(model = mod_xgb_tree_inst)
+imp %>% 
+  filter((Gain) > .0035, (Cover > .0035)) %>% 
+  ggplot(aes(x = log(Gain), y = log(Cover), col = (Frequency)))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  geom_text(aes(label = Feature))
+
+
+
+
 ```
