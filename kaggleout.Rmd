@@ -1421,3 +1421,180 @@ imp %>%
 
 
 ```
+
+So it looks as though we've got another percent or so from the installation data.
+
+What's next?
+
+Probably the previous applications...
+
+```{r previousexplore}
+
+colnames(previous_application) %in% colnames(application_train)
+
+colnames(previous_application)[c(2:4, 6, 8:10, 21)]
+
+previous_application %>% 
+  left_join(TARGET, by = "SK_ID_CURR") %>% 
+  ggplot(aes(x = CODE_REJECT_REASON, y = AMT_APPLICATION, col = DAYS_DECISION))+
+  geom_jitter()+
+  scale_color_gradientn(colours = rainbow(10))+
+  facet_grid(TARGET~.)
+
+previous_application %>% 
+  left_join(TARGET, by = "SK_ID_CURR") %>%
+  ggplot(aes(x = CODE_REJECT_REASON))+
+  geom_histogram(stat = "count")+
+  facet_grid(TARGET~.)
+
+
+previous_application %>% 
+  left_join(TARGET, by = "SK_ID_CURR") %>%
+  filter(CODE_REJECT_REASON %in% c("SCO", "LIMIT", "HC", "XNA")) %>% 
+  ggplot(aes(x = CODE_REJECT_REASON, y = DAYS_DECISION, col = CODE_REJECT_REASON))+
+  geom_violin()+
+  facet_grid(TARGET~.)+
+  scale_y_continuous(limits = c(-500,0))
+
+```
+
+There's quite a group of defaulters who applied and got recection reason XNA exactly one year ago, or just after. 
+
+```{r moreprevviolins}
+
+previous_application %>% 
+  left_join(TARGET, by = "SK_ID_CURR") %>%
+  left_join(application_train %>% select(SK_ID_CURR, AMT_INCOME_TOTAL), by = "SK_ID_CURR") %>% 
+  filter(CODE_REJECT_REASON %in% c("SCO", "LIMIT", "HC", "XNA")) %>% 
+  ggplot(aes(x = CODE_REJECT_REASON, y = AMT_DOWN_PAYMENT/AMT_INCOME_TOTAL, col = CODE_REJECT_REASON))+
+  geom_violin()+
+  facet_grid(TARGET~.)+
+  scale_y_continuous(limits = c(0,.02))
+
+previous_application %>% 
+  ggplot(aes(x = AMT_DOWN_PAYMENT/AMT_APPLICATION, y = AMT_CREDIT, col = AMT_APPLICATION))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))
+
+previous_application %>% 
+  left_join(TARGET, by = "SK_ID_CURR") %>%
+  filter(AMT_CREDIT < 150000) %>% 
+  ggplot(aes(x = AMT_DOWN_PAYMENT/AMT_APPLICATION, y = AMT_CREDIT, col = AMT_GOODS_PRICE))+
+  geom_point(alpha = 0.5)+
+  scale_colour_gradientn(colours = rainbow(10))+
+  facet_grid(TARGET~.)
+
+
+```
+
+```{r morecardinals}
+previous_application$PRODUCT_COMBINATION %>% unique()
+previous_application$NAME_SELLER_INDUSTRY %>% unique()
+previous_application$NAME_GOODS_CATEGORY %>% unique()
+previous_application$NAME_CASH_LOAN_PURPOSE %>% unique()
+
+prev_app_summ <-previous_application %>% 
+  left_join(TARGET, by = "SK_ID_CURR") %>%
+  filter(SK_ID_CURR %in% application_train_train$SK_ID_CURR) %>% 
+  group_by(PRODUCT_COMBINATION, NAME_SELLER_INDUSTRY) %>% 
+  summarise(AMT_APPLICATION = mean(AMT_APPLICATION),
+            DAYS_DECISION = mean(DAYS_DECISION),
+            TARGET.mean.2 = mean(TARGET, na.rm = T),
+            number = n())
+
+prev_app_summ %>% 
+  filter(number > 50) %>% 
+  ggplot(aes(x = PRODUCT_COMBINATION, y = NAME_SELLER_INDUSTRY, size = number, col = DAYS_DECISION))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+prev_app_summ %>% 
+  filter(number > 100) %>% 
+  ggplot(aes(x = PRODUCT_COMBINATION, y = NAME_SELLER_INDUSTRY, size = number, col = TARGET.mean.2))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+prev_app_summ2 <- previous_application %>% 
+  left_join(TARGET, by = "SK_ID_CURR") %>%
+  filter(SK_ID_CURR %in% application_train_train$SK_ID_CURR) %>% 
+  group_by(NAME_GOODS_CATEGORY, NAME_CASH_LOAN_PURPOSE) %>% 
+  summarise(AMT_APPLICATION = mean(AMT_APPLICATION),
+            DAYS_DECISION = mean(DAYS_DECISION),
+            TARGET.mean.3 = mean(TARGET, na.rm = T),
+            number = n())
+
+prev_app_summ2 %>% 
+  filter(number > 50) %>% 
+  ggplot(aes(x = NAME_GOODS_CATEGORY, y = NAME_CASH_LOAN_PURPOSE, size = number, col = DAYS_DECISION))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+prev_app_summ2 %>% 
+  filter(number > 1000) %>% 
+  ggplot(aes(x = NAME_GOODS_CATEGORY, y = NAME_CASH_LOAN_PURPOSE, size = number, col = TARGET.mean.3))+
+  geom_point()+
+  scale_colour_gradientn(colours = rainbow(10))+
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+```
+
+Looks like it's time to put together a summary. 
+
+```{r summarisingprevapp}
+
+previous_application$SK_ID_CURR %>% unique() %>% length()
+
+prev_app_summ_index_amt <- previous_application %>% 
+  group_by(SK_ID_CURR) %>% 
+  arrange(AMT_APPLICATION) %>% 
+  summarise(SK_ID_PREV = last(SK_ID_PREV))
+  
+previous_summ_amt <- previous_application %>% 
+  filter(SK_ID_PREV %in% prev_app_summ_index_amt$SK_ID_PREV) %>% 
+  select(-SK_ID_PREV) %>% 
+  mutate(yearout = (DAYS_DECISION+365)^2)
+previous_summ_amt <- previous_summ_amt %>% 
+  left_join(prev_app_summ %>% select(PRODUCT_COMBINATION, NAME_SELLER_INDUSTRY, TARGET.mean.2), by = c("PRODUCT_COMBINATION", "NAME_SELLER_INDUSTRY")) %>% 
+  left_join(prev_app_summ2 %>% select(NAME_GOODS_CATEGORY, NAME_CASH_LOAN_PURPOSE, TARGET.mean.3), by = c("NAME_GOODS_CATEGORY", "NAME_CASH_LOAN_PURPOSE"))
+colnames(previous_summ_amt) <- colnames(previous_summ_amt) %>% paste0(.,".app")
+colnames(installments_summ_last)[1] <- "SK_ID_CURR"
+  
+prev_app_summ_index_dec <- previous_application %>% 
+  group_by(SK_ID_CURR) %>% 
+  arrange(DAYS_DECISION) %>% 
+  summarise(SK_ID_PREV = last(SK_ID_PREV))
+
+previous_summ_dec <- previous_application %>% 
+  filter(SK_ID_PREV %in% prev_app_summ_index_dec$SK_ID_PREV) %>% 
+  select(-SK_ID_PREV) %>% 
+  mutate(yearout = (DAYS_DECISION+365)^2)
+previous_summ_dec <- previous_summ_dec %>% 
+  left_join(prev_app_summ %>% select(PRODUCT_COMBINATION, NAME_SELLER_INDUSTRY, TARGET.mean.2), by = c("PRODUCT_COMBINATION", "NAME_SELLER_INDUSTRY")) %>% 
+  left_join(prev_app_summ2 %>% select(NAME_GOODS_CATEGORY, NAME_CASH_LOAN_PURPOSE, TARGET.mean.3), by = c("NAME_GOODS_CATEGORY", "NAME_CASH_LOAN_PURPOSE"))
+colnames(previous_summ_dec) <- colnames(previous_summ_dec) %>% paste0(.,".dec")
+colnames(installments_summ_last)[1] <- "SK_ID_CURR"
+
+colnames(previous_application)[c(2:4, 6, 8:10, 21)]
+
+previous_summ_summ <- previous_application %>% 
+  left_join(application_train %>% select(SK_ID_CURR, AMT_INCOME_TOTAL), by = "SK_ID_CURR") %>% 
+  group_by(SK_ID_CURR) %>% 
+  summarise(DAYS_DECISION.mean = mean(DAYS_DECISION, na.rm = T),
+            DAYS_DECISION.sd = sd(DAYS_DECISION, na.rm = T),
+            CODE_REJECT_REASON.mode = Mode(CODE_REJECT_REASON),
+            AMT_APPLICATION.mean = mean(AMT_APPLICATION, na.rm = T),
+            AMT_APPLICATION.sd = sd(AMT_APPLICATION, na.rm = T),
+            DAYS_DECISION.365 = mean(DAYS_DECISION, na.rm = T) + 365,
+            DAYS_DECISION.365.sq = (mean(DAYS_DECISION, na.rm = T) + 365)^2,
+            DAYS_DECISION.365.over = case_when(mean(DAYS_DECISION) <= -365 & mean(DAYS_DECISION) >= -396 ~1),
+            NFLAG_INSURED_ON_APPROVAL.mode = Mode(NFLAG_INSURED_ON_APPROVAL),
+            AMT_DOWN_PAYMENT_AMT_APPLICATION.mean = mean(AMT_DOWN_PAYMENT/AMT_APPLICATION, na.rm = T),
+            RATIO.mean = mean(AMT_APPLICATION/AMT_INCOME_TOTAL, na.rm = T),
+            RATIO.sd = sd(AMT_APPLICATION/AMT_INCOME_TOTAL, na.rm = T))
+
+
+
+```
