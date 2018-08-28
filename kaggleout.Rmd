@@ -1560,7 +1560,7 @@ previous_summ_amt <- previous_summ_amt %>%
   left_join(prev_app_summ %>% select(PRODUCT_COMBINATION, NAME_SELLER_INDUSTRY, TARGET.mean.2), by = c("PRODUCT_COMBINATION", "NAME_SELLER_INDUSTRY")) %>% 
   left_join(prev_app_summ2 %>% select(NAME_GOODS_CATEGORY, NAME_CASH_LOAN_PURPOSE, TARGET.mean.3), by = c("NAME_GOODS_CATEGORY", "NAME_CASH_LOAN_PURPOSE"))
 colnames(previous_summ_amt) <- colnames(previous_summ_amt) %>% paste0(.,".app")
-colnames(installments_summ_last)[1] <- "SK_ID_CURR"
+colnames(previous_summ_amt)[1] <- "SK_ID_CURR"
   
 prev_app_summ_index_dec <- previous_application %>% 
   group_by(SK_ID_CURR) %>% 
@@ -1575,7 +1575,7 @@ previous_summ_dec <- previous_summ_dec %>%
   left_join(prev_app_summ %>% select(PRODUCT_COMBINATION, NAME_SELLER_INDUSTRY, TARGET.mean.2), by = c("PRODUCT_COMBINATION", "NAME_SELLER_INDUSTRY")) %>% 
   left_join(prev_app_summ2 %>% select(NAME_GOODS_CATEGORY, NAME_CASH_LOAN_PURPOSE, TARGET.mean.3), by = c("NAME_GOODS_CATEGORY", "NAME_CASH_LOAN_PURPOSE"))
 colnames(previous_summ_dec) <- colnames(previous_summ_dec) %>% paste0(.,".dec")
-colnames(installments_summ_last)[1] <- "SK_ID_CURR"
+colnames(previous_summ_dec)[1] <- "SK_ID_CURR"
 
 colnames(previous_application)[c(2:4, 6, 8:10, 21)]
 
@@ -1594,6 +1594,102 @@ previous_summ_summ <- previous_application %>%
             AMT_DOWN_PAYMENT_AMT_APPLICATION.mean = mean(AMT_DOWN_PAYMENT/AMT_APPLICATION, na.rm = T),
             RATIO.mean = mean(AMT_APPLICATION/AMT_INCOME_TOTAL, na.rm = T),
             RATIO.sd = sd(AMT_APPLICATION/AMT_INCOME_TOTAL, na.rm = T))
+
+
+
+```
+
+```{r joinprevious}
+previous_summ_master <- previous_summ_summ %>% 
+  left_join(previous_summ_amt, by = "SK_ID_CURR") %>% 
+  left_join(previous_summ_dec, by = "SK_ID_CURR")
+
+previous_summ_master <- previous_summ_master %>% 
+  select(-contains("PRODUCT_COMBINATION"), -contains("NAME_SELLER_INDUSTRY"), -contains("NAME_GOODS_CATEGORY"), -contains("NAME_CASH_LOAN_PURPOSE"))
+
+```
+
+Time to put together what we've found from the previous application data and join it with the previous application training set
+
+```{r xgbwithprevious}
+
+# application_train_train <- application_train_train.
+# application_train_test <- application_train_test.
+
+application_train_train. <- application_train_train %>% 
+  left_join(previous_summ_master, by = "SK_ID_CURR")
+
+application_train_test. <- application_train_test %>% 
+  left_join(previous_summ_master, by = "SK_ID_CURR")
+
+skim(application_train_train.)
+
+application_train_train. <- application_train_train. %>% 
+  mutate(EXT_23_diff = EXT_SOURCE_2 - EXT_SOURCE_3,
+         EXT_12_diff = EXT_SOURCE_1 - EXT_SOURCE_2,
+         EXT_13_diff = EXT_SOURCE_1 - EXT_SOURCE_3,
+         EXT_23_diff_sq = (EXT_SOURCE_2 - EXT_SOURCE_3)^2,
+         EXT_12_diff_sq = (EXT_SOURCE_1 - EXT_SOURCE_2)^2,
+         EXT_13_diff_sq = (EXT_SOURCE_1 - EXT_SOURCE_3)^2,
+         EXT_23_sum = EXT_SOURCE_2 + EXT_SOURCE_3,
+         EXT_12_sum = EXT_SOURCE_1 + EXT_SOURCE_2,
+         EXT_13_sum = EXT_SOURCE_1 + EXT_SOURCE_3)
+
+application_train_test. <- application_train_test. %>% 
+  mutate(EXT_23_diff = EXT_SOURCE_2 - EXT_SOURCE_3,
+         EXT_12_diff = EXT_SOURCE_1 - EXT_SOURCE_2,
+         EXT_13_diff = EXT_SOURCE_1 - EXT_SOURCE_3,
+         EXT_23_diff_sq = (EXT_SOURCE_2 - EXT_SOURCE_3)^2,
+         EXT_12_diff_sq = (EXT_SOURCE_1 - EXT_SOURCE_2)^2,
+         EXT_13_diff_sq = (EXT_SOURCE_1 - EXT_SOURCE_3)^2,
+         EXT_23_sum = EXT_SOURCE_2 + EXT_SOURCE_3,
+         EXT_12_sum = EXT_SOURCE_1 + EXT_SOURCE_2,
+         EXT_13_sum = EXT_SOURCE_1 + EXT_SOURCE_3)
+
+application_train_train.[is.na(application_train_train.)] <- -10000000
+application_train_test.[is.na(application_train_test.)] <- -10000000
+
+### Without the highly cardinal features
+ train <- list(sparse.model.matrix(~., data = application_train_train. %>% select(-SK_ID_CURR, -TARGET,  -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET")) %>%  filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown", NAME_CONTRACT_TYPE.app != "XNA")), application_train_train. %>% filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown") %>%  pull(TARGET))
+ names(train) <- c("data", "label")
+ test <- list(sparse.model.matrix( ~ ., data = application_train_test. %>% select(-SK_ID_CURR, -TARGET, -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET")) %>% filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown", NAME_CONTRACT_TYPE.app != "XNA")), application_train_test. %>% filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown", NAME_CONTRACT_TYPE.app != "XNA") %>%  pull(TARGET))
+ names(test) <- c("data", "label")
+ 
+ ### potential problem vars
+ # - NAME_FAMILY_STATUS, - NAME_INCOME_TYPE, -OWN_CAR_AGE,
+
+# application_train_train %>% select(-TARGET, -OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique() == application_train_test %>% select(-TARGET, - OWN_CAR_AGE, -contains("Predicted_TARGET")) %>% colnames() %>% unique()
+# 
+train[["data"]]@Dimnames[[2]] %in% test[["data"]]@Dimnames[[2]] #%>% unique()
+ test[["data"]]@Dimnames[[2]] %in% train[["data"]]@Dimnames[[2]] 
+
+
+ 
+ dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+ dtest <- xgb.DMatrix(data = test$data, label=test$label)
+ watchlist <- list(train=dtrain, test=dtest)
+#
+ #mod_xgb_lin <- xgb.train(data = dtrain, booster = "gblinear",  nrounds = 50, watchlist = watchlist)
+ mod_xgb_tree_inst <- xgb.train(data = dtrain,  booster = "gbtree", eta = .02, nrounds = 1500, watchlist = watchlist)
+
+ 
+prediction <- predict(mod_xgb_tree_inst, test$data) %>% tibble()
+colnames(prediction) <- c("Predicted_TARGET_xgb_tree_inst_prev")
+application_train_test. <- application_train_test. %>% filter(CODE_GENDER != "XNA", NAME_FAMILY_STATUS != "Unknown", NAME_CONTRACT_TYPE.app != "XNA") %>%  bind_cols(prediction)
+head(application_train_test.$Predicted_TARGET_xgb_tree_inst)
+roc(response = application_train_test.$TARGET, predictor = prediction$Predicted_TARGET_xgb_tree_inst_prev)
+
+imp <- xgb.importance(model = mod_xgb_tree_inst)
+imp %>% 
+  filter((Gain) > .0035, (Cover > .0035)) %>% 
+  ggplot(aes(x = log(Gain), y = log(Cover), col = (Frequency)))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  geom_text(aes(label = Feature))
+
+
+
+
 
 
 
