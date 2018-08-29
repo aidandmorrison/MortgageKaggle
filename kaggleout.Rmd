@@ -489,14 +489,16 @@ credit_card_balance_summ <- credit_card_balance %>%
             max.lim = max(AMT_CREDIT_LIMIT_ACTUAL),
             min.lim = min(AMT_CREDIT_LIMIT_ACTUAL),
             diff.lim = max.lim - min.lim,
-            mean.bal = mean(AMT_BALANCE),
-            mean.count.draw = mean(CNT_DRAWINGS_CURRENT),
-            mean.count.ATM = mean(CNT_DRAWINGS_ATM_CURRENT),
-            sd.bal.med = sd(AMT_BALANCE)/median(AMT_BALANCE),
-            sd.bal = sd(AMT_BALANCE),
-            mean.count.POS = mean(CNT_DRAWINGS_POS_CURRENT),
-            sd.count.POS = sd(CNT_DRAWINGS_POS_CURRENT),
-            draw.frac = mean((AMT_BALANCE - AMT_CREDIT_LIMIT_ACTUAL+1)/(AMT_CREDIT_LIMIT_ACTUAL+1)))
+            mean.bal = mean(AMT_BALANCE, na.rm = T),
+            mean.count.draw = mean(CNT_DRAWINGS_CURRENT, na.rm = T),
+            mean.count.ATM = mean(CNT_DRAWINGS_ATM_CURRENT, na.rm = T),
+            sd.bal.med = sd(AMT_BALANCE, na.rm = T)/median(AMT_BALANCE),
+            sd.bal = sd(AMT_BALANCE, na.rm = T),
+            mean.count.POS = mean(CNT_DRAWINGS_POS_CURRENT, na.rm = T),
+            sd.count.POS = sd(CNT_DRAWINGS_POS_CURRENT, na.rm = T),
+            draw.frac = mean((AMT_BALANCE - AMT_CREDIT_LIMIT_ACTUAL+1)/(AMT_CREDIT_LIMIT_ACTUAL+1), na.rm = T),
+            diff.mean = mean(AMT_BALANCE - AMT_CREDIT_LIMIT_ACTUAL, na.rm = T),
+            diff.sd = sd(AMT_BALANCE - AMT_CREDIT_LIMIT_ACTUAL, na.rm = T))
 
 credit_card_balance_summ_1 <- credit_card_balance %>% 
   filter(MONTHS_BALANCE == -1) %>% 
@@ -509,11 +511,13 @@ credit_card_balance_summ_1 <- credit_card_balance %>%
             over.lim.due = overlim*overdue,
             limdiff = first(AMT_BALANCE)-first(AMT_CREDIT_LIMIT_ACTUAL))
 
-credit_card_balance_summ <- credit_card_balance_summ %>% 
-  inner_join(credit_card_balance_summ_1, by = "SK_ID_CURR") %>% 
+credit_summ_master <- credit_card_balance_summ %>% 
+  left_join(credit_card_balance_summ_1, by = "SK_ID_CURR") %>% 
   mutate(has.credit.card = 1)
 
-skim(credit_card_balance_summ)
+#credit_summ_master$SK_ID_CURR %in% application_test$SK_ID_CURR %>% sum()
+
+skim(credit_summ_master)
 
 credit_card_balance_summ %>% 
   filter(sd.bal.med < 10) %>% 
@@ -617,7 +621,7 @@ application_train_train %>%
 ## We need a summary
 
 ```{r, cardinalsumm, cache=T}
-cardinal_summ <- application_train_train %>% 
+cardinal_summ <- application_train %>% 
   group_by(ORGANIZATION_TYPE, OCCUPATION_TYPE) %>% 
   summarise(TARGET.mean = mean(TARGET),
             AMT_INCOME_TOTAL.mean = mean(AMT_INCOME_TOTAL),
@@ -736,6 +740,23 @@ cardinal_summ <- cardinal_summ %>%
                              number >= 80 & TARGET.mean >=0.15 ~ "VHIGH"),
          oddjob = case_when(number < 50 ~ 1,
                             number >= 50 ~0))
+
+cardinal_summ_master <- application_train %>% 
+  bind_rows(application_test) %>% 
+  select(-TARGET) %>% 
+  left_join(cardinal_summ, by = c("OCCUPATION_TYPE", "ORGANIZATION_TYPE")) 
+
+cardinal_summ_master <- cardinal_summ_master%>% 
+  mutate(AMT_CREDIT.disp = AMT_CREDIT - AMT_ANNUITY.mean,
+         AMT_ANNUITY.disp = AMT_ANNUITY- AMT_ANNUITY.mean,
+         AMT_INCOME_TOTAL.disp = AMT_INCOME_TOTAL - AMT_INCOME_TOTAL.mean,
+         DAYS_EMPLOYED.disp = DAYS_EMPLOYED - DAYS_BIRTH.mean,
+         DAYS_BIRTH.disp = DAYS_BIRTH - DAYS_BIRTH.mean)
+
+cardinal_summ_master <- cardinal_summ_master %>% 
+  select(SK_ID_CURR, contains(".mean"), contains(".med"), contains(".disp"), jobrisk, oddjob, number)
+
+skim(cardinal_summ_master)
 
 application_train_train <- application_train_train %>% 
   left_join(cardinal_summ, by = c("OCCUPATION_TYPE", "ORGANIZATION_TYPE"))
@@ -1181,23 +1202,23 @@ installments_summ_prev <- installments_payments %>%
          DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>%
   mutate(AMT_INSTALMENT.rel.income = AMT_INSTALMENT/(AMT_INCOME_TOTAL+1)) %>% 
   group_by(SK_ID_PREV) %>% 
-  summarise(AMT_PAYMENT.mean = mean(AMT_PAYMENT),
-            AMT_PAYMENT.sd = sd(AMT_PAYMENT),
+  summarise(AMT_PAYMENT.mean = mean(AMT_PAYMENT, na.rm = T),
+            AMT_PAYMENT.sd = sd(AMT_PAYMENT, na.rm = T),
             PAYMENT.last = max(DAYS_ENTRY_PAYMENT),
             LOAN.length = max(DAYS_INSTALMENT) - min(DAYS_INSTALMENT),
-            AMT_INSTALMENT.rel.income = mean(AMT_INSTALMENT.rel.income),
-            AMT.diff.mean = mean(AMT.diff),
-            DAYS.diff.mean = mean(AMT.diff),
-            AMT.diff.max = max(AMT.diff),
-            DAYS.diff.max = max(AMT.diff),
-            AMT.diff.min = min(AMT.diff),
-            DAYS.diff.min = min(AMT.diff),
-            AMT.diff.sd = sd(AMT.diff),
+            AMT_INSTALMENT.rel.income = mean(AMT_INSTALMENT.rel.income, na.rm = T),
+            AMT.diff.mean = mean(AMT.diff, na.rm = T),
+            DAYS.diff.mean = mean(AMT.diff, na.rm = T),
+            AMT.diff.max = max(AMT.diff, na.rm = T),
+            DAYS.diff.max = max(AMT.diff, na.rm = T),
+            AMT.diff.min = min(AMT.diff, na.rm = T),
+            DAYS.diff.min = min(AMT.diff, na.rm = T),
+            AMT.diff.sd = sd(AMT.diff, na.rm = T),
             INSTALMENT.rel.sd = sd(AMT_INSTALMENT.rel.income, na.rm = T),
-            DAYS.diff.sd = sd(DAYS.diff),
-            AMT.diff.rel.income = mean(AMT.diff/(AMT_INCOME_TOTAL+1)),
-            DAYS.diff.rel.employed = mean(DAYS.diff/(DAYS_EMPLOYED +1)),
-            LOAN.length.rel.employed = mean(LOAN.length/DAYS_EMPLOYED))
+            DAYS.diff.sd = sd(DAYS.diff, na.rm = T),
+            AMT.diff.rel.income = mean(AMT.diff/(AMT_INCOME_TOTAL+1), na.rm = T),
+            DAYS.diff.rel.employed = mean(DAYS.diff/(DAYS_EMPLOYED +1), na.rm = T),
+            LOAN.length.rel.employed = mean(LOAN.length/DAYS_EMPLOYED, na.rm = T))
 
 
 
