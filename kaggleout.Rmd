@@ -1197,7 +1197,7 @@ Mode <- function(x) {
 
 installments_summ_prev <- installments_payments %>%
   #head(n = 500000) %>% 
-  left_join(application_train, by = "SK_ID_CURR") %>% 
+  left_join(application_train %>% select(-TARGET) %>% bind_rows(application_test), by = "SK_ID_CURR") %>% 
   mutate(AMT.diff = AMT_PAYMENT - AMT_INSTALMENT,
          DAYS.diff = DAYS_ENTRY_PAYMENT - DAYS_INSTALMENT) %>%
   mutate(AMT_INSTALMENT.rel.income = AMT_INSTALMENT/(AMT_INCOME_TOTAL+1)) %>% 
@@ -1209,10 +1209,10 @@ installments_summ_prev <- installments_payments %>%
             AMT_INSTALMENT.rel.income = mean(AMT_INSTALMENT.rel.income, na.rm = T),
             AMT.diff.mean = mean(AMT.diff, na.rm = T),
             DAYS.diff.mean = mean(AMT.diff, na.rm = T),
-            AMT.diff.max = max(AMT.diff, na.rm = T),
-            DAYS.diff.max = max(AMT.diff, na.rm = T),
-            AMT.diff.min = min(AMT.diff, na.rm = T),
-            DAYS.diff.min = min(AMT.diff, na.rm = T),
+            AMT.diff.max = max(AMT.diff),
+            DAYS.diff.max = max(AMT.diff),
+            AMT.diff.min = min(AMT.diff),
+            DAYS.diff.min = min(AMT.diff),
             AMT.diff.sd = sd(AMT.diff, na.rm = T),
             INSTALMENT.rel.sd = sd(AMT_INSTALMENT.rel.income, na.rm = T),
             DAYS.diff.sd = sd(DAYS.diff, na.rm = T),
@@ -1351,9 +1351,13 @@ SK_KEY <- installments_payments %>%
 installments_summ_prev <- installments_summ_prev %>% 
   left_join(SK_KEY, by = "SK_ID_PREV")
 
+####### Check SK_ID_CURR position #######
+colnames(installments_summ_prev)
+
 installments_summ_last <- installments_summ_prev %>% 
   filter(SK_ID_PREV %in% installments_summ_index_last$SK_ID_PREV) %>% 
   select(-SK_ID_PREV)
+colnames(installments_summ_last)
 colnames(installments_summ_last) <- colnames(installments_summ_last) %>% paste0(.,".last")
 colnames(installments_summ_last)[25] <- "SK_ID_CURR"
 
@@ -1602,7 +1606,7 @@ colnames(previous_summ_dec)[1] <- "SK_ID_CURR"
 colnames(previous_application)[c(2:4, 6, 8:10, 21)]
 
 previous_summ_summ <- previous_application %>% 
-  left_join(application_train %>% select(SK_ID_CURR, AMT_INCOME_TOTAL), by = "SK_ID_CURR") %>% 
+  left_join(application_train %>% select(-TARGET) %>% bind_rows(application_test) %>%  select(SK_ID_CURR, AMT_INCOME_TOTAL), by = "SK_ID_CURR") %>% 
   group_by(SK_ID_CURR) %>% 
   summarise(DAYS_DECISION.mean = mean(DAYS_DECISION, na.rm = T),
             DAYS_DECISION.sd = sd(DAYS_DECISION, na.rm = T),
@@ -1632,6 +1636,31 @@ previous_summ_master <- previous_summ_master %>%
 ```
 
 Time to put together what we've found from the previous application data and join it with the previous application training set
+
+```{r externals}
+EXT_master <- application_train %>% 
+  bind_rows(application_test) %>% 
+  select(-TARGET) %>% 
+  select(SK_ID_CURR, contains("EXT_SOURCE")) %>% 
+  mutate(EXT_23_diff = EXT_SOURCE_2 - EXT_SOURCE_3,
+         EXT_12_diff = EXT_SOURCE_1 - EXT_SOURCE_2,
+         EXT_13_diff = EXT_SOURCE_1 - EXT_SOURCE_3,
+         EXT_23_diff_sq = (EXT_SOURCE_2 - EXT_SOURCE_3)^2,
+         EXT_12_diff_sq = (EXT_SOURCE_1 - EXT_SOURCE_2)^2,
+         EXT_13_diff_sq = (EXT_SOURCE_1 - EXT_SOURCE_3)^2,
+         EXT_23_sum = EXT_SOURCE_2 + EXT_SOURCE_3,
+         EXT_12_sum = EXT_SOURCE_1 + EXT_SOURCE_2,
+         EXT_13_sum = EXT_SOURCE_1 + EXT_SOURCE_3) %>% 
+  select(-EXT_SOURCE_1, -EXT_SOURCE_2, -EXT_SOURCE_3)
+
+application_train %>% 
+  #bind_rows(application_test) %>% 
+  select(-TARGET) %>% 
+  select(SK_ID_CURR, contains("EXT_SOURCE")) %>% skim()
+
+
+```
+
 
 ```{r xgbwithprevious}
 
@@ -1786,7 +1815,7 @@ bureau_summ_index_recent <- bureau %>%
   summarise(SK_ID_BUREAU = last(SK_ID_BUREAU))
 bureau_summ_recent <- bureau %>%
   filter(SK_ID_BUREAU %in% bureau_summ_index_recent$SK_ID_BUREAU) %>% 
-  left_join(application_train %>% select(SK_ID_CURR, AMT_INCOME_TOTAL, DAYS_EMPLOYED), by = "SK_ID_CURR") %>% 
+  left_join(application_train %>% bind_rows(application_test) %>% select(-TARGET) %>%  select(SK_ID_CURR, AMT_INCOME_TOTAL, DAYS_EMPLOYED), by = "SK_ID_CURR") %>% 
   mutate(AMT_CREDIT_MAX_OVERDUE.ratio.inc = AMT_CREDIT_MAX_OVERDUE/(AMT_INCOME_TOTAL+1),
          AMT_CREDIT_MAX_OVERDUE.ratio.annunity = AMT_CREDIT_MAX_OVERDUE/(AMT_ANNUITY+1),
          DAYS_ENDDATE_FACT.ratio.emp = DAYS_ENDDATE_FACT/(DAYS_EMPLOYED+1),
@@ -1803,7 +1832,7 @@ bureau_summ_index_early <- bureau %>%
   summarise(SK_ID_BUREAU = last(SK_ID_BUREAU))
 bureau_summ_early <- bureau %>% 
   filter(SK_ID_BUREAU %in% bureau_summ_index_early$SK_ID_BUREAU) %>% 
-  left_join(application_train %>% select(SK_ID_CURR, AMT_INCOME_TOTAL, DAYS_EMPLOYED), by = "SK_ID_CURR") %>% 
+  left_join(application_train %>% bind_rows(application_test) %>% select(-TARGET) %>% select(SK_ID_CURR, AMT_INCOME_TOTAL, DAYS_EMPLOYED), by = "SK_ID_CURR") %>% 
   mutate(AMT_CREDIT_MAX_OVERDUE.ratio.inc = AMT_CREDIT_MAX_OVERDUE/(AMT_INCOME_TOTAL+1),
          AMT_CREDIT_MAX_OVERDUE.ratio.annunity = AMT_CREDIT_MAX_OVERDUE/(AMT_ANNUITY+1),
          DAYS_ENDDATE_FACT.ratio.emp = DAYS_ENDDATE_FACT/(DAYS_EMPLOYED+1),
@@ -1820,7 +1849,7 @@ bureau_summ_index_large <- bureau %>%
   summarise(SK_ID_BUREAU = last(SK_ID_BUREAU))
 bureau_summ_large <- bureau %>% 
   filter(SK_ID_BUREAU %in% bureau_summ_index_large$SK_ID_BUREAU) %>% 
-  left_join(application_train %>% select(SK_ID_CURR, AMT_INCOME_TOTAL, DAYS_EMPLOYED), by = "SK_ID_CURR") %>% 
+  left_join(application_train %>% bind_rows(application_test) %>% select(-TARGET) %>% select(SK_ID_CURR, AMT_INCOME_TOTAL, DAYS_EMPLOYED), by = "SK_ID_CURR") %>% 
   mutate(AMT_CREDIT_MAX_OVERDUE.ratio.inc = AMT_CREDIT_MAX_OVERDUE/(AMT_INCOME_TOTAL+1),
          AMT_CREDIT_MAX_OVERDUE.ratio.annunity = AMT_CREDIT_MAX_OVERDUE/(AMT_ANNUITY+1),
          DAYS_ENDDATE_FACT.ratio.emp = DAYS_ENDDATE_FACT/(DAYS_EMPLOYED+1),
@@ -1837,7 +1866,7 @@ bureau_summ_index_small <- bureau %>%
   summarise(SK_ID_BUREAU = last(SK_ID_BUREAU))
 bureau_summ_small <- bureau %>% 
   filter(SK_ID_BUREAU %in% bureau_summ_index_small$SK_ID_BUREAU) %>% 
-  left_join(application_train %>% select(SK_ID_CURR, AMT_INCOME_TOTAL, DAYS_EMPLOYED), by = "SK_ID_CURR") %>% 
+  left_join(application_train %>% bind_rows(application_test) %>% select(-TARGET) %>% select(SK_ID_CURR, AMT_INCOME_TOTAL, DAYS_EMPLOYED), by = "SK_ID_CURR") %>% 
   mutate(AMT_CREDIT_MAX_OVERDUE.ratio.inc = AMT_CREDIT_MAX_OVERDUE/(AMT_INCOME_TOTAL+1),
          AMT_CREDIT_MAX_OVERDUE.ratio.annunity = AMT_CREDIT_MAX_OVERDUE/(AMT_ANNUITY+1),
          DAYS_ENDDATE_FACT.ratio.emp = DAYS_ENDDATE_FACT/(DAYS_EMPLOYED+1),
@@ -1850,7 +1879,7 @@ colnames(bureau_summ_small)[1] <- "SK_ID_CURR"
 
 
 bureau_summ_summ <- bureau %>% 
-  left_join(application_train %>% select(-AMT_ANNUITY), by = "SK_ID_CURR") %>% 
+  left_join(application_train %>% bind_rows(application_test) %>% select(-TARGET) %>% select(-AMT_ANNUITY), by = "SK_ID_CURR") %>% 
   mutate(AMT_CREDIT_MAX_OVERDUE.ratio.inc = AMT_CREDIT_MAX_OVERDUE/(AMT_INCOME_TOTAL+1),
          AMT_CREDIT_MAX_OVERDUE.ratio.annunity = AMT_CREDIT_MAX_OVERDUE/(AMT_ANNUITY+1),
          DAYS_ENDDATE_FACT.ratio.emp = DAYS_ENDDATE_FACT/(DAYS_EMPLOYED+1),
@@ -1882,18 +1911,18 @@ bureau_summ_master <- bureau_summ_summ %>%
   left_join(bureau_summ_large, by = "SK_ID_CURR") %>% 
   left_join(bureau_summ_small, by = "SK_ID_CURR") 
   
-mod_rpart_bureau <- bureau_summ_master %>% 
-  left_join(TARGET, by = "SK_ID_CURR") %>% 
-  select(-SK_ID_CURR) %>% rpart(formula = TARGET ~., cp = .001)
-
-summary(mod_rpart_bureau)
-rpart.plot(mod_rpart_bureau)
-
-colnames(application_train_train.)
+# mod_rpart_bureau <- bureau_summ_master %>% 
+#   left_join(TARGET, by = "SK_ID_CURR") %>% 
+#   select(-SK_ID_CURR) %>% rpart(formula = TARGET ~., cp = .001)
+# 
+# summary(mod_rpart_bureau)
+# rpart.plot(mod_rpart_bureau)
+# 
+# colnames(application_train_train.)
 
 bureau_summ_master <- bureau_summ_master %>% 
   left_join(previous_summ_master %>% select(SK_ID_CURR, DAYS_DECISION.app, DAYS_DECISION.dec, DAYS_DECISION.mean), by = "SK_ID_CURR") %>% 
-  left_join(application_train %>% select(DAYS_EMPLOYED, SK_ID_CURR), by = "SK_ID_CURR") %>% 
+  left_join(application_train %>% bind_rows(application_test) %>% select(-TARGET) %>% select(DAYS_EMPLOYED, SK_ID_CURR), by = "SK_ID_CURR") %>% 
   mutate(DAYS_CREDIT.mean.diff.DAYS_DECISION.app = DAYS_CREDIT.mean - DAYS_DECISION.app,
          DAYS_CREDIT.recent.diff.DAYS_DECISION.dec = DAYS_CREDIT.recent - DAYS_DECISION.dec,
          DAYS_CREDIT.large.diff.DAYS_DECISION.app = DAYS_CREDIT.large - DAYS_DECISION.app,
@@ -1903,15 +1932,15 @@ bureau_summ_master <- bureau_summ_master %>%
   select(-DAYS_DECISION.app, -DAYS_DECISION.dec, -DAYS_DECISION.mean, -DAYS_EMPLOYED)
 
 ### checking to see how much damage we do by removing variables or observations
-bureau %>% inner_join(application_train %>% select(SK_ID_CURR, TARGET), by = "SK_ID_CURR") %>%
-  filter(!CREDIT_TYPE %in% c("Consumer credit", "Credit card", "Car loan", "Mortgage", "Microloan", "Loan for business development")) %>% 
-  ggplot(aes(x = CREDIT_TYPE))+
-  geom_histogram(stat = "count")+
-  facet_grid(.~ TARGET)+
-  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+# bureau %>% inner_join(application_train %>% select(SK_ID_CURR, TARGET), by = "SK_ID_CURR") %>%
+#   filter(!CREDIT_TYPE %in% c("Consumer credit", "Credit card", "Car loan", "Mortgage", "Microloan", "Loan for business development")) %>% 
+#   ggplot(aes(x = CREDIT_TYPE))+
+#   geom_histogram(stat = "count")+
+#   facet_grid(.~ TARGET)+
+#   theme(axis.text.x = element_text(angle = 60, hjust = 1))
 
 
-bureau_summ_master %>% select(contains("CREDIT_ACTIVE"), contains("CREDIT_TYPE"))
+#bureau_summ_master %>% select(contains("CREDIT_ACTIVE"), contains("CREDIT_TYPE"))
 
 ### removing some problem variables, maybe this won't be necessary in the whole training and test set
 bureau_summ_master <- bureau_summ_master %>% 
@@ -2029,3 +2058,107 @@ skim(application_train_train.)
 
 
 ```
+
+```{r finalpredict}
+
+full_dataset <- application_train %>% 
+  bind_rows(application_test) %>% 
+  left_join(credit_summ_master, by = "SK_ID_CURR") %>% 
+  left_join(cardinal_summ_master, by = "SK_ID_CURR") %>% 
+  left_join(installments_summ_master, by = "SK_ID_CURR") %>% 
+  left_join(previous_summ_master, by = "SK_ID_CURR") %>% 
+  left_join(EXT_master, by = "SK_ID_CURR") %>% 
+  left_join(bureau_summ_master, by = "SK_ID_CURR")
+
+glimpse(full_dataset)
+
+full_dataset[is.na(full_dataset)] <- -10000000
+
+train <- list(sparse.model.matrix(~., data = full_dataset %>% filter(SK_ID_CURR %in% application_train$SK_ID_CURR) %>%  select(-SK_ID_CURR, -TARGET,  -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), full_dataset %>% filter(SK_ID_CURR %in% application_train$SK_ID_CURR) %>%  pull(TARGET))
+
+ names(train) <- c("data", "label")
+ 
+ test <- list(sparse.model.matrix( ~ ., data = full_dataset %>% filter(SK_ID_CURR %in% application_test$SK_ID_CURR) %>%  select(-SK_ID_CURR, -TARGET,  -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))))
+ names(test) <- c("data")
+
+dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+
+mod_xgb_tree_final <- xgb.train(data = dtrain,  booster = "gbtree", eta = .1, nrounds = 20)
+
+prediction <- predict(mod_xgb_tree_final, test$data) %>% tibble()
+colnames(prediction) <- c("Predicted_TARGET_final")
+
+badtrain <- which(!train[["data"]]@Dimnames[[2]] %in% test[["data"]]@Dimnames[[2]])
+badtest <- which(!test[["data"]]@Dimnames[[2]] %in% train[["data"]]@Dimnames[[2]])
+badtrain
+badtest
+train_namelist <- train[["data"]]@Dimnames[[2]]
+test_namelist <- test[["data"]]@Dimnames[[2]]
+
+problemfinder(train_namelist, badtrain)
+problemfinder(test_namelist, badtest)
+
+### cooercing missing variables.
+
+full_dataset$NAME_CONTRACT_TYPE.app %>% unique()
+
+full_dataset_fixed <- full_dataset %>% 
+  mutate(CREDIT_TYPE.early = case_when(CREDIT_TYPE.early %in% c("Loan for the purchase of equipment") ~ "Too small a type",
+                                       !CREDIT_TYPE.early %in% c("Loan for the purchase of equipment") ~ CREDIT_TYPE.early),
+         CREDIT_TYPE.small = case_when(CREDIT_TYPE.small %in% c("Loan for the purchase of equipment") ~ "Too small a type",
+                                       !CREDIT_TYPE.small %in% c("Loan for the purchase of equipment") ~ CREDIT_TYPE.small),
+         CREDIT_TYPE.recent = case_when(CREDIT_TYPE.recent %in% c("Loan for the purchase of equipment") ~ "Too small a type",
+                                       !CREDIT_TYPE.recent %in% c("Loan for the purchase of equipment") ~ CREDIT_TYPE.recent),
+         CODE_GENDER = case_when(CODE_GENDER %in% c("XNA") ~ "M",
+                                       !CODE_GENDER %in% c("XNA") ~ CODE_GENDER),
+         NAME_INCOME_TYPE = case_when(NAME_INCOME_TYPE %in% c("Maternity leave") ~ "Working",
+                                      !NAME_INCOME_TYPE %in% c("Maternity leave") ~ NAME_INCOME_TYPE),
+         NAME_FAMILY_STATUS = case_when(NAME_FAMILY_STATUS %in% c("Unknown") ~ "Single / not married",
+                                        !NAME_FAMILY_STATUS %in% c("Unknown") ~ NAME_FAMILY_STATUS),
+         NAME_CONTRACT_TYPE.dec = case_when(NAME_CONTRACT_TYPE.dec %in% c("XNA") ~ "-1e+07",
+                                            !NAME_CONTRACT_TYPE.dec %in% c("XNA") ~ NAME_CONTRACT_TYPE.dec),
+         CODE_REJECT_REASON.dec = case_when(CODE_REJECT_REASON.dec %in% c("SYSTEM") ~ "XNA",
+                                            !CODE_REJECT_REASON.dec %in% c("SYSTEM") ~ CODE_REJECT_REASON.dec),
+         jobrisk = case_when(jobrisk %in% c("HIGH") ~ "-1e+07",
+                             !jobrisk %in% c("HIGH") ~ jobrisk),
+         NAME_CONTRACT_TYPE.app = case_when(NAME_CONTRACT_TYPE.app == "XNA" ~ "-1e+07",
+                                            !NAME_CONTRACT_TYPE.app == "XNA" ~ NAME_CONTRACT_TYPE.app))
+         
+## Having another go   
+        
+train <- list(sparse.model.matrix(~., data = full_dataset_fixed %>% filter(SK_ID_CURR %in% application_train$SK_ID_CURR) %>%  select(-SK_ID_CURR, -TARGET,  -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))), full_dataset_fixed %>% filter(SK_ID_CURR %in% application_train$SK_ID_CURR) %>%  pull(TARGET))
+
+names(train) <- c("data", "label")
+ 
+test <- list(sparse.model.matrix( ~ ., data = full_dataset_fixed %>% filter(SK_ID_CURR %in% application_test$SK_ID_CURR) %>%  select(-SK_ID_CURR, -TARGET,  -OCCUPATION_TYPE, -ORGANIZATION_TYPE, -contains("Predicted_TARGET"))))
+names(test) <- c("data")
+
+dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+
+mod_xgb_tree_final <- xgb.train(data = dtrain,  booster = "gbtree", eta = .02, nrounds = 2000)
+
+prediction <- predict(mod_xgb_tree_final, test$data) %>% tibble()
+colnames(prediction) <- c("TARGET") 
+
+prediction<- prediction %>% bind_cols(application_test %>% select(SK_ID_CURR))
+prediction <- prediction %>% select(SK_ID_CURR, TARGET)
+prediction <- prediction %>% 
+  mutate(TARGET = rescale(TARGET))
+         
+prediction %>% write_csv("kaggleprediction3.csv")
+
+prediction %>% skim()
+
+imp <- xgb.importance(model = mod_xgb_tree_final)
+imp %>% 
+  filter((Gain) > .0035, (Cover > .0035)) %>% 
+  ggplot(aes(x = log(Gain), y = log(Cover), col = (Frequency)))+
+  geom_point()+
+  scale_color_gradientn(colours = rainbow(10))+
+  geom_text(aes(label = Feature))
+         
+
+
+```
+
+
